@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: tbot_backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
