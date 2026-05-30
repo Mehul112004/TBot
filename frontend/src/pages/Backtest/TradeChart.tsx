@@ -36,17 +36,6 @@ export default function TradeChart({ trades, symbol, timeframe }: Props) {
       setError(null);
 
       try {
-        // Determine date range from trades
-        const entryTimes = trades.map((t) => new Date(t.entry_time).getTime());
-        const exitTimes = trades
-          .filter((t) => t.exit_time)
-          .map((t) => new Date(t.exit_time!).getTime());
-        const allTimes = [...entryTimes, ...exitTimes];
-        const minTime = new Date(Math.min(...allTimes));
-        const maxTime = new Date(Math.max(...allTimes));
-
-        // Add padding (10% on each side)
-
         // Fetch candle data for the range
         const { data } = await apiClient.get("/data/datasets");
         const datasets = data.datasets as {

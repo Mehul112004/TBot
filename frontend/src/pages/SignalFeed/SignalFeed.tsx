@@ -78,7 +78,7 @@ export default function SignalFeed() {
             Notification.permission === "granted"
           ) {
             new Notification("New Setup Detected", {
-              body: `${setup.symbol} - ${setup.strategy} (${setup.timeframe})`,
+              body: `${setup.symbol} - ${setup.strategy_name} (${setup.timeframe})`,
             });
           }
           break;
