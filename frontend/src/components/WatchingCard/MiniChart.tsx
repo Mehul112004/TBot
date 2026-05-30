@@ -51,8 +51,9 @@ export default function MiniChart({ symbol, timeframe, entry }: MiniChartProps) 
     });
 
     // Fetch recent candles for this mini chart
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api';
     fetch(
-      `http://localhost:5001/api/data/datasets?symbol=${symbol}&timeframe=${timeframe}`
+      `${API_BASE}/data/datasets?symbol=${symbol}&timeframe=${timeframe}`
     )
       .then((res) => res.json())
       .then((json) => {
@@ -62,7 +63,7 @@ export default function MiniChart({ symbol, timeframe, entry }: MiniChartProps) 
         const ds = datasets[0];
         // Get recent candle data from the indicators endpoint including series
         return fetch(
-          `http://localhost:5001/api/indicators?symbol=${ds.symbol}&timeframe=${ds.timeframe}&include_series=true`
+          `${API_BASE}/indicators?symbol=${ds.symbol}&timeframe=${ds.timeframe}&include_series=true`
         );
       })
       .then((res) => res?.json())

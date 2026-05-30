@@ -35,7 +35,10 @@ def create_app(test_config=None):
 
     with app.app_context():
         # Create tables
-        db.create_all()
+        try:
+            db.create_all()
+        except Exception as e:
+            print(f"[create_app] db.create_all() failed (DB may be unreachable): {e}")
         
         # Backward compatibility column add
         try:
@@ -49,6 +52,9 @@ def create_app(test_config=None):
             "ALTER TABLE candles ADD COLUMN is_closed BOOLEAN DEFAULT TRUE",
             "ALTER TABLE watching_setups ADD COLUMN context_data JSONB",
             "ALTER TABLE confirmed_signals ADD COLUMN context_data JSONB",
+            "ALTER TABLE confirmed_signals ADD COLUMN telegram_status VARCHAR(20) DEFAULT 'PENDING'",
+            "ALTER TABLE confirmed_signals ADD COLUMN telegram_retries INTEGER DEFAULT 0",
+            "ALTER TABLE confirmed_signals ADD COLUMN telegram_message_id VARCHAR(50)",
         ]:
             try:
                 db.session.execute(text(col_ddl))
@@ -56,41 +62,38 @@ def create_app(test_config=None):
             except Exception:
                 db.session.rollback()
 
-        # Create hypertable if it doesn't exist
-        try:
-            db.session.execute(text("SELECT create_hypertable('candles', 'open_time', if_not_exists => TRUE);"))
-            db.session.commit()
-        except Exception as e:
-            # Table might already be a hypertable, rollback session to be safe
-            db.session.rollback()
-            print(f"Hypertable initialization info: {e}")
-
         # Initialize strategy registry
-        from app.core.strategy_loader import registry
-        registry.load_builtin_strategies()
-        registry.sync_with_db()
+        try:
+            from app.core.strategy_loader import registry
+            registry.load_builtin_strategies()
+            registry.sync_with_db()
+        except Exception as e:
+            print(f"[create_app] Strategy registry init failed: {e}")
 
     # Initialize background scheduler and live scanner (only in non-testing mode)
     if not app.config.get('TESTING', False):
-        from app.core.scanner import live_scanner
-        live_scanner.set_app(app)
-        atexit.register(live_scanner.stop_all)
+        try:
+            from app.core.scanner import live_scanner
+            live_scanner.set_app(app)
+            atexit.register(live_scanner.stop_all)
 
-        from app.core.scheduler import init_scheduler
-        init_scheduler(app, live_scanner)
-        
-        from app.core.llm_queue import llm_queue
-        llm_queue.set_app(app)
-        llm_queue.start()
-        atexit.register(llm_queue.stop)
-        
-        from app.core.telegram_queue import telegram_queue
-        telegram_queue.set_app(app)
-        telegram_queue.start()
-        atexit.register(telegram_queue.stop)
-        
-        from app.core.outcome_tracker import outcome_tracker
-        outcome_tracker.set_app(app)
-        outcome_tracker.rebuild_cache()
+            from app.core.scheduler import init_scheduler
+            init_scheduler(app, live_scanner)
+            
+            from app.core.llm_queue import llm_queue
+            llm_queue.set_app(app)
+            llm_queue.start()
+            atexit.register(llm_queue.stop)
+            
+            from app.core.telegram_queue import telegram_queue
+            telegram_queue.set_app(app)
+            telegram_queue.start()
+            atexit.register(telegram_queue.stop)
+            
+            from app.core.outcome_tracker import outcome_tracker
+            outcome_tracker.set_app(app)
+            outcome_tracker.rebuild_cache()
+        except Exception as e:
+            print(f"[create_app] Background services init failed (DB may be unreachable): {e}")
 
     return app
