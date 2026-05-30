@@ -13,20 +13,10 @@ from app.blueprints.backtest_bp import backtest_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
-    
-    # Lock down CORS to frontend origin in production
-    frontend_origin = os.environ.get('FRONTEND_URL', '*')
-    CORS(app, origins=[frontend_origin])
+    CORS(app)
     
     # Configure Database
-    db_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:password@localhost:5432/signals_db')
-    # Supabase PgBouncer requires prepared statements disabled
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-        'pool_size': 10,
-        'pool_recycle': 300,
-        'pool_pre_ping': True,
-    }
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://postgres:password@localhost:5432/signals_db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
     # Apply test overrides
@@ -65,6 +55,15 @@ def create_app(test_config=None):
                 db.session.commit()
             except Exception:
                 db.session.rollback()
+
+        # Create hypertable if it doesn't exist
+        try:
+            db.session.execute(text("SELECT create_hypertable('candles', 'open_time', if_not_exists => TRUE);"))
+            db.session.commit()
+        except Exception as e:
+            # Table might already be a hypertable, rollback session to be safe
+            db.session.rollback()
+            print(f"Hypertable initialization info: {e}")
 
         # Initialize strategy registry
         from app.core.strategy_loader import registry

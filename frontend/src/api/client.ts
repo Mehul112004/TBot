@@ -1,9 +1,7 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-
 export const apiClient = axios.create({
-  baseURL: API_BASE,
+  baseURL: 'http://localhost:5001/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -251,7 +249,7 @@ export const fetchBacktestRun = async (runId: string): Promise<{ run: BacktestRu
 };
 
 export const getBacktestExportUrl = (runId: string): string => {
-  return `${API_BASE}/backtest/${runId}/export`;
+  return `http://localhost:5001/api/backtest/${runId}/export`;
 };
 
 // ---------- Phase 8: LLM Logs ----------

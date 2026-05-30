@@ -6,7 +6,8 @@ db = SQLAlchemy()
 class Candle(db.Model):
     __tablename__ = 'candles'
 
-    # Composite primary key on symbol, timeframe, and open_time.
+    # TimescaleDB hypertables work best without a standard auto-increment PK.
+    # We use a composite primary key consisting of symbol, timeframe, and open_time.
     symbol = db.Column(db.String(50), primary_key=True)
     timeframe = db.Column(db.String(10), primary_key=True)
     open_time = db.Column(db.DateTime(timezone=True), primary_key=True)

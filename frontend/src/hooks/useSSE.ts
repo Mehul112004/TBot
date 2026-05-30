@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { SSEEventType } from '../types/signals';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
-const SSE_URL = `${API_BASE}/signals/stream`;
+const SSE_URL = 'http://localhost:5001/api/signals/stream';
 const RECONNECT_DELAY = 3000;
 
 interface SSEHookReturn {
