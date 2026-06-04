@@ -41,7 +41,7 @@ class TestSessionLifecycle:
     @patch('app.core.scanner.BinanceStreamManager')
     def test_start_session(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        result = scanner.start_session("BTCUSDT", ["EMA Crossover"])
+        result = scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
         assert result['symbol'] == 'BTCUSDT'
         assert result['status'] == 'active'
         assert 'session_id' in result
@@ -51,7 +51,7 @@ class TestSessionLifecycle:
     def test_stop_session(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
         MockStream.return_value.stop = MagicMock()
-        session = scanner.start_session("BTCUSDT", ["EMA Crossover"])
+        session = scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
         assert scanner.stop_session(session['session_id']) is True
         assert len(scanner.get_active_sessions()) == 0
 
@@ -63,8 +63,8 @@ class TestSessionLifecycle:
     def test_stop_all(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
         MockStream.return_value.stop = MagicMock()
-        scanner.start_session("BTCUSDT", ["EMA Crossover"])
-        scanner.start_session("ETHUSDT", ["RSI Reversal"])
+        scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
+        scanner.start_session("ETHUSDT", ["Trend Following"])
         scanner.stop_all()
         assert len(scanner.get_active_sessions()) == 0
 
@@ -74,17 +74,17 @@ class TestMaxSessions:
     @patch('app.core.scanner.BinanceStreamManager')
     def test_max_sessions_enforced(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        scanner.start_session("BTCUSDT", ["EMA Crossover"])
-        scanner.start_session("ETHUSDT", ["RSI Reversal"])
+        scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
+        scanner.start_session("ETHUSDT", ["Trend Following"])
         with pytest.raises(ValueError, match="Maximum"):
-            scanner.start_session("SOLUSDT", ["MACD Momentum"])
+            scanner.start_session("SOLUSDT", ["Breakout & Retest"])
 
     @patch('app.core.scanner.BinanceStreamManager')
     def test_duplicate_symbol_rejected(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        scanner.start_session("BTCUSDT", ["EMA Crossover"])
+        scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
         with pytest.raises(ValueError, match="already active"):
-            scanner.start_session("BTCUSDT", ["RSI Reversal"])
+            scanner.start_session("BTCUSDT", ["Trend Following"])
 
     @patch('app.core.scanner.BinanceStreamManager')
     def test_invalid_strategy_rejected(self, MockStream, scanner):
@@ -96,23 +96,22 @@ class TestSessionMetadata:
     @patch('app.core.scanner.BinanceStreamManager')
     def test_timeframes_resolved_from_strategies(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        result = scanner.start_session("BTCUSDT", ["EMA Crossover"])
-        # EMA Crossover has timeframes: ["15m", "1h", "4h"]
-        assert "15m" in result['timeframes']
+        result = scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
+        # EMA Cross Alert has timeframes: ["30m", "1h"]
+        assert "30m" in result['timeframes']
         assert "1h" in result['timeframes']
-        assert "4h" in result['timeframes']
 
     @patch('app.core.scanner.BinanceStreamManager')
     def test_timeframes_merged_across_strategies(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        # EMA Crossover: 15m, 1h, 4h  |  RSI Reversal: 1h, 4h
-        result = scanner.start_session("BTCUSDT", ["EMA Crossover", "RSI Reversal"])
-        assert sorted(result['timeframes']) == sorted(["5m", "15m", "1h", "4h"])
+        # EMA Cross Alert: 30m, 1h  |  Trend Following: 1h
+        result = scanner.start_session("BTCUSDT", ["EMA Cross Alert", "Trend Following"])
+        assert sorted(result['timeframes']) == sorted(["30m", "1h"])
 
     @patch('app.core.scanner.BinanceStreamManager')
     def test_live_price_initially_none(self, MockStream, scanner):
         MockStream.return_value.start = MagicMock()
-        result = scanner.start_session("BTCUSDT", ["EMA Crossover"])
+        result = scanner.start_session("BTCUSDT", ["EMA Cross Alert"])
         assert result['live_price'] is None
 
 
@@ -122,7 +121,7 @@ class TestAnalysisSessionDataclass:
         session = AnalysisSession(
             session_id="abc-123",
             symbol="BTCUSDT",
-            strategy_names=["EMA Crossover"],
+            strategy_names=["EMA Cross Alert"],
             timeframes=["1h", "4h"],
             created_at=datetime(2026, 1, 1),
             live_price=67000.0,

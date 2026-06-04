@@ -406,30 +406,6 @@ class LiveScanner:
                                 signal=signal,
                                 pre_processed_df=pre_df,
                             )
-                    if result is None:
-                        continue
-                    signal, pre_df = result
-                    if signal is None:
-                        continue
-                        signals_found += 1
-                        print(f"[LiveScanner]    ✅ SIGNAL: {strat_name} → {signal.direction} "
-                              f"conf={signal.confidence:.2f}")
-                        setup_dict, is_new = WatchingManager.create_or_update_setup(session_id, signal)
-                        event_type = "setup_detected" if is_new else "setup_updated"
-                        sse_manager.publish(event_type, setup_dict)
-
-                        if is_new:
-                            telegram_queue.enqueue_watching_alert(setup_dict['id'])
-                            
-                            if hasattr(strategy, 'should_confirm_with_llm') and strategy.should_confirm_with_llm(signal):
-                                llm_queue.enqueue_signal(
-                                    watching_setup_id=setup_dict['id'],
-                                    signal=signal,
-                                    candles=candle_objects,
-                                    indicators=indicators,
-                                    sr_zones=sr_zones,
-                                    htf_candles=htf_candles
-                                )
 
                 if signals_found == 0:
                     strats_checked = [s for s in session.strategy_names

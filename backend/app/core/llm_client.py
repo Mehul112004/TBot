@@ -128,9 +128,17 @@ class LLMClient:
             if k != 'primary_bias':
                 prompt += f"{k}: {v}\n"
 
+        candles = context.get('recent_price_action', [])
+        candles_str = ""
+        if candles:
+            for c in candles:
+                candles_str += f"Time: {c.get('t')} | O: {c.get('o')} | H: {c.get('h')} | L: {c.get('l')} | C: {c.get('c')} | V: {c.get('v')}\n"
+        else:
+            candles_str = "No recent candle data available.\n"
+
         prompt += (
             f"\n═══ RECENT PRICE ACTION ═══\n"
-            f"See attached candles array in the context.\n"
+            f"{candles_str}"
             f"Look for: pin bars (long wick, small body), engulfing candles, "
             f"doji indecision, and support/resistance tests.\n\n"
             f"Respond with JSON only: {{\"reasoning\": \"...\", \"confidence_score\": N, "

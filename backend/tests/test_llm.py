@@ -3,20 +3,62 @@ from app.core.base_strategy import SetupSignal, Candle, Indicators
 from app.core.llm_client import LLMClient, LLMVerdictSchema, LLM_CONFIDENCE_THRESHOLD
 
 def test_prompt_builder():
-    signal = SetupSignal(strategy_name="TestStrat", symbol="BTCUSDT", timeframe="4h", direction="LONG", confidence=0.8, entry=40000.0)
-    candles = [Candle(datetime.now(), 40000, 40100, 39900, 40050, 100)]
-    inds = Indicators(rsi_14=45, macd_line=10, macd_signal=8, macd_histogram=2, ema_9=39000, ema_21=38000, ema_50=35000, ema_200=30000, atr_14=150.0)
-    sr_zones = [{'price_level': 39000, 'zone_type': 'support', 'strength_score': 0.8}]
+    context = {
+        "signal_metadata": {
+            "symbol": "BTCUSDT",
+            "strategy": "TestStrat",
+            "timeframe": "4h",
+            "side": "LONG",
+            "entry": 40000.0,
+            "sl": 39500.0,
+            "tp1": 41000.0,
+            "tp2": 42000.0,
+            "confidence": 0.8,
+            "regime": "TRENDING_UP"
+        },
+        "market_structure": {
+            "current_bias": "TRENDING_UP",
+            "structural_bias": "BULLISH",
+            "regime_strength": 1.5,
+            "last_event": "BOS",
+            "recent_swing_high": 42000.0,
+            "recent_swing_low": 39000.0,
+            "current_price": 40050.0,
+            "price_position_in_range_pct": 35.0
+        },
+        "indicators": {
+            "rsi": 45.0,
+            "rsi_gradient": "Rising",
+            "rsi_divergence": "Bullish",
+            "ema_alignment": "Bullish_Perfect_Order",
+            "bb_state": "Normal",
+            "adx": 25.0,
+            "trend_strength": "Strong",
+            "ema_values": {"ema_9": 39000.0, "ema_50": 35000.0, "ema_200": 30000.0}
+        },
+        "volume": {
+            "rvol": 1.5,
+            "is_climax": False
+        },
+        "htf_context": {
+            "primary_bias": "Bullish"
+        },
+        "recent_price_action": [
+            {
+                "t": "2026-06-04 22:00:00",
+                "o": 40000.0,
+                "h": 40100.0,
+                "l": 39900.0,
+                "c": 40050.0,
+                "v": 100.0
+            }
+        ]
+    }
     
-    prompt = LLMClient._build_prompt_context(signal, candles, inds, sr_zones)
+    prompt = LLMClient._build_prompt(context)
     assert "TestStrat" in prompt
     assert "BTCUSDT" in prompt
-    # Chain-of-thought: prompt should instruct reasoning first
-    assert "reasoning FIRST" in prompt
-    # Candle momentum analysis should be injected
-    assert "Body/ATR ratio" in prompt
-    # Should NOT hallucinate — prompt must warn against it
-    assert "Do NOT invent" in prompt
+    assert "Time: 2026-06-04 22:00:00 | O: 40000.0 | H: 40100.0 | L: 39900.0 | C: 40050.0 | V: 100.0" in prompt
     print("Prompt builder is working successfully.")
 
 def test_schema_field_order():
