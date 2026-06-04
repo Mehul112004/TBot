@@ -193,7 +193,7 @@ Nodes (0):
 
 ### Community 20 - "Confirmed Card UI"
 Cohesion: 0.67
-Nodes (0): 
+Nodes (2): audit_file(), Audit a single file. Returns number of violations (0 = clean).
 
 ### Community 21 - "LLM Queue & Signals"
 Cohesion: 0.67
@@ -321,11 +321,11 @@ Nodes (1): True if close < open.
 
 ### Community 52 - "Indicators Snapshot"
 Cohesion: 1.0
-Nodes (1): Build an Indicators snapshot from full indicator series at position idx.
+Nodes (1): Universal output of every strategy's scan() method.     This object flows throug
 
 ### Community 53 - "Strategy Scan Method"
 Cohesion: 1.0
-Nodes (1): Called on every candle close for each active timeframe.         Return a SetupSi
+Nodes (1): Override to customize stop-loss calculation.         Default: Structural SL behi
 
 ### Community 54 - "Backend Init"
 Cohesion: 1.0
@@ -345,7 +345,7 @@ Nodes (0):
 
 ### Community 58 - "Stream Active Check"
 Cohesion: 1.0
-Nodes (1): Check if the stream is currently active.
+Nodes (1): Tracks detected trade setups that are being monitored (watching cards).     Crea
 
 ### Community 59 - "Platform Overview"
 Cohesion: 1.0

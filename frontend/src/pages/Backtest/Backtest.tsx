@@ -51,7 +51,7 @@ export default function Backtest() {
   return (
     <div className="h-full flex flex-col" id="backtest-page">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-slate-700 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between flex-shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-white">Backtest Engine</h1>
           <p className="text-sm text-slate-400 mt-0.5">
@@ -67,9 +67,9 @@ export default function Backtest() {
         )}
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
         {/* Config Sidebar */}
-        <div className="w-80 border-r border-slate-700 overflow-y-auto bg-slate-800/40 flex-shrink-0">
+        <div className="w-full lg:w-80 border-b lg:border-b-0 lg:border-r border-slate-700 bg-slate-800/40 flex-shrink-0">
           <ConfigPanel
             strategies={strategies}
             onSubmit={handleRunBacktest}
@@ -78,9 +78,9 @@ export default function Backtest() {
         </div>
 
         {/* Results Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-grow flex flex-col min-h-[400px] lg:min-h-0 lg:overflow-hidden">
           {loading && (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex items-center justify-center py-12">
               <div className="text-center">
                 <div className="w-10 h-10 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4" />
                 <p className="text-slate-400">Running backtest...</p>
@@ -89,7 +89,7 @@ export default function Backtest() {
           )}
 
           {error && !loading && (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex items-center justify-center p-6">
               <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-6 py-4 max-w-md text-center">
                 <p className="text-red-400 font-medium">Backtest Failed</p>
                 <p className="text-red-300/70 text-sm mt-1">{error}</p>
@@ -98,7 +98,7 @@ export default function Backtest() {
           )}
 
           {!result && !loading && !error && (
-            <div className="flex-1 flex items-center justify-center">
+            <div className="flex-1 flex items-center justify-center py-16">
               <div className="text-center text-slate-500">
                 <div className="text-5xl mb-4 opacity-30">📊</div>
                 <p className="text-lg font-medium">Configure & run a backtest</p>
@@ -110,12 +110,12 @@ export default function Backtest() {
           {result && !loading && (
             <>
               {/* Tab Bar */}
-              <div className="px-6 pt-4 flex gap-1 border-b border-slate-700">
+              <div className="px-6 pt-4 flex gap-1 border-b border-slate-700 overflow-x-auto whitespace-nowrap scrollbar-none flex-shrink-0">
                 {tabs.map(tab => (
                   <button
                     key={tab.key}
                     onClick={() => setActiveTab(tab.key)}
-                    className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
+                    className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors flex-shrink-0 ${
                       activeTab === tab.key
                         ? 'bg-slate-700/60 text-emerald-400 border-b-2 border-emerald-400'
                         : 'text-slate-400 hover:text-white hover:bg-slate-700/30'
@@ -128,7 +128,7 @@ export default function Backtest() {
               </div>
 
               {/* Tab Content */}
-              <div className="flex-1 overflow-auto p-6">
+              <div className="flex-grow p-4 sm:p-6 overflow-visible lg:overflow-auto">
                 {activeTab === 'metrics' && <MetricsSummary metrics={result.metrics} />}
                 {activeTab === 'equity' && <EquityCurve data={result.equity_curve} />}
                 {activeTab === 'chart' && (

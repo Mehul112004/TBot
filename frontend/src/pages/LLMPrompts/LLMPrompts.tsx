@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bot, CheckCircle, XCircle, AlertTriangle, ChevronRight, MessageSquareCode } from 'lucide-react';
+import { Bot, CheckCircle, XCircle, AlertTriangle, ChevronRight, ChevronLeft, MessageSquareCode } from 'lucide-react';
 import { fetchLLMLogs, type LLMPromptLog } from '../../api/client';
 
 const getVerdictIcon = (verdict: string) => {
@@ -36,6 +36,7 @@ const LLMPrompts: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   
   const [selectedLog, setSelectedLog] = useState<LLMPromptLog | null>(null);
+  const [showDetailOnMobile, setShowDetailOnMobile] = useState(false);
   
   // Pagination
   const [page, setPage] = useState(0);
@@ -85,14 +86,17 @@ const LLMPrompts: React.FC = () => {
       ) : logs.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-slate-500">No prompt logs found.</div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
           {/* Master List (Sidebar) */}
-          <div className="w-1/3 border-r border-slate-700 bg-slate-800/30 flex flex-col overflow-hidden">
+          <div className={`w-full md:w-1/3 border-r border-slate-700 bg-slate-800/30 flex flex-col overflow-hidden ${showDetailOnMobile ? 'hidden md:flex' : 'flex'}`}>
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {logs.map((log) => (
                 <button
                   key={log.id}
-                  onClick={() => setSelectedLog(log)}
+                  onClick={() => {
+                    setSelectedLog(log);
+                    setShowDetailOnMobile(true);
+                  }}
                   className={`w-full flex items-center p-3 rounded-lg border text-left transition-colors ${
                     selectedLog?.id === log.id 
                       ? 'bg-slate-700 border-blue-500' 
@@ -146,10 +150,21 @@ const LLMPrompts: React.FC = () => {
           </div>
 
           {/* Detail View (Main Area) */}
-          <div className="flex-1 bg-slate-900 overflow-y-auto">
+          <div className={`flex-1 bg-slate-900 overflow-y-auto ${showDetailOnMobile ? 'flex flex-col' : 'hidden md:flex md:flex-col'}`}>
             {selectedLog ? (
-              <div className="p-6 space-y-6">
+              <div className="p-4 md:p-6 space-y-6">
                 
+                {/* Back button on mobile */}
+                <div className="md:hidden flex items-center mb-2">
+                  <button
+                    onClick={() => setShowDetailOnMobile(false)}
+                    className="flex items-center text-blue-400 hover:text-blue-300 font-semibold text-sm"
+                  >
+                    <ChevronLeft size={16} className="mr-1" />
+                    Back to Logs
+                  </button>
+                </div>
+
                 {/* Meta Header */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
                   <div>

@@ -106,7 +106,7 @@ export default function SessionPanel({
         {activeSessions.map((session) => (
           <div
             key={session.session_id}
-            className="flex justify-between items-center bg-slate-800/70 backdrop-blur-sm px-4 py-3 border border-slate-700/50 rounded-xl"
+            className="flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center bg-slate-800/70 backdrop-blur-sm px-4 py-3 border border-slate-700/50 rounded-xl"
           >
             <div className="flex items-center gap-4">
               <div>
@@ -132,7 +132,7 @@ export default function SessionPanel({
             <button
               onClick={() => onStopSession(session.session_id)}
               disabled={isLoading}
-              className="flex items-center gap-1 bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50 px-2.5 py-1 rounded-lg text-red-400 text-xs transition"
+              className="w-full sm:w-auto flex items-center justify-center gap-1 bg-red-500/20 hover:bg-red-500/30 disabled:opacity-50 px-2.5 py-1.5 sm:py-1 rounded-lg text-red-400 text-xs transition"
             >
               <Square size={10} />
               Stop

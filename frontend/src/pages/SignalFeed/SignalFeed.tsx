@@ -199,9 +199,9 @@ export default function SignalFeed() {
 
   return (
     <div className="w-full h-full overflow-y-auto">
-      <div className="mx-auto p-6 max-w-[1600px]">
+      <div className="mx-auto p-4 md:p-6 max-w-[1600px]">
         {/* Page Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center mb-6">
           <div>
             <h1 className="mb-1 font-bold text-2xl text-white">Signal Feed</h1>
             <p className="text-slate-400 text-sm">
@@ -211,7 +211,7 @@ export default function SignalFeed() {
           <button
             onClick={handleQuickStart}
             disabled={isLoading || strategies.length === 0 || !canStartNew}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 shadow-sm px-4 py-2 rounded font-medium text-sm text-white transition disabled:cursor-not-allowed"
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 shadow-sm px-4 py-2 rounded font-medium text-sm text-white transition disabled:cursor-not-allowed"
           >
             Quick Start (BTC, ETH & SOL)
           </button>
@@ -229,10 +229,10 @@ export default function SignalFeed() {
         />
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 mb-6 border-slate-700/50 border-b">
+        <div className="flex items-center gap-1 mb-6 border-slate-700/50 border-b overflow-x-auto whitespace-nowrap scrollbar-none">
           <button
             onClick={() => setActiveTab("watching")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition flex-shrink-0 ${
               activeTab === "watching"
                 ? "border-emerald-500 text-emerald-400"
                 : "border-transparent text-slate-400 hover:text-slate-300"
@@ -248,7 +248,7 @@ export default function SignalFeed() {
           </button>
           <button
             onClick={() => setActiveTab("confirmed")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition flex-shrink-0 ${
               activeTab === "confirmed"
                 ? "border-emerald-500 text-emerald-400"
                 : "border-transparent text-slate-400 hover:text-slate-300"
@@ -259,7 +259,7 @@ export default function SignalFeed() {
           </button>
           <button
             onClick={() => setActiveTab("rejected")}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition flex-shrink-0 ${
               activeTab === "rejected"
                 ? "border-red-500 text-red-400"
                 : "border-transparent text-slate-400 hover:text-slate-300"

@@ -13,7 +13,7 @@ const HistoricalData: React.FC = () => {
 
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="space-y-6 mx-auto p-8 max-w-6xl">
+      <div className="space-y-6 mx-auto p-4 md:p-8 max-w-6xl">
         <header className="mb-8">
           <h1 className="mb-2 font-bold text-3xl text-white">
             Historical Data Hub
