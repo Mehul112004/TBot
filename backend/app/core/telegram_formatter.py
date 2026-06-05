@@ -155,7 +155,7 @@ def format_price_alert(alert: PriceAlert, current_price: float) -> str:
 *Alert*     : Price {direction_text} ${_escape_md(f"{alert.target_price:,.4f}")}
 *Current*   : ${_escape_md(f"{current_price:,.4f}")}
 *Type*      : {_escape_md(alert.alert_type)}{"  " + direction_icon}
-{("Note*      : " + note_text) if note_text else ""}
+{("*Note*      : " + note_text) if note_text else ""}
 ⏱ {_escape_md(time_str)}
 """
     return msg.strip()

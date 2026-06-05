@@ -195,8 +195,8 @@ class LLMQueueManager:
                     symbol=signal.symbol,
                     strategy_name=signal.strategy_name,
                     model_name=provider.model,
-                    prompt_text=prompt[:2000],
-                    response_text=raw_response[:2000] if raw_response else "",
+                    prompt_text=prompt,
+                    response_text=raw_response if raw_response else "",
                     parsed_verdict=parsed_verdict,
                 )
                 db.session.add(new_log)
