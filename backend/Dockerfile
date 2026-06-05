@@ -12,4 +12,4 @@ COPY . .
 ENV FLASK_APP=run.py
 ENV PORT=8080
 
-CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 run:app
+CMD gunicorn --bind 0.0.0.0:$PORT --worker-class gevent --workers 1 --timeout 120 run:app

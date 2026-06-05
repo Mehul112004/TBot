@@ -1,0 +1,25 @@
+runtime: custom
+env: flex
+
+resources:
+  cpu: 1
+  memory_gb: 2
+  disk_size_gb: 10
+
+automatic_scaling:
+  min_num_instances: 1
+  max_num_instances: 2
+
+env_variables:
+  FLASK_APP: run.py
+  FLASK_ENV: production
+  LLM_PROVIDER: groq
+  LLM_API_URL: https://api.groq.com/openai/v1/chat/completions
+  LLM_MAX_TOKENS: "2500"
+  SIGNAL_EXPIRY_CANDLES: "3"
+  DATABASE_URL: postgresql://postgres.[PROJECT_REF]:[YOUR_PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+  TELEGRAM_BOT_TOKEN: "[YOUR_TELEGRAM_BOT_TOKEN]"
+  TELEGRAM_CHAT_ID: "[YOUR_TELEGRAM_CHAT_ID]"
+  GROQ_API_KEY: "[YOUR_GROQ_API_KEY]"
+  LLM_API_KEY: "[YOUR_LLM_API_KEY]"
+  LLM_MODEL: "[YOUR_LLM_MODEL]"

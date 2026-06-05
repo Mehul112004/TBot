@@ -10,3 +10,5 @@ numpy
 apscheduler
 websocket-client
 gunicorn
+gevent
+pydantic
