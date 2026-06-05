@@ -5,8 +5,8 @@ import logging
 from typing import Tuple
 
 from app.core.telegram_client import telegram_client
-from app.core.telegram_formatter import format_confirmed_signal, format_outcome_update, format_watching_signal, format_rejected_signal
-from app.models.db import db, ConfirmedSignal, WatchingSetup
+from app.core.telegram_formatter import format_confirmed_signal, format_outcome_update, format_watching_signal, format_rejected_signal, format_price_alert
+from app.models.db import db, ConfirmedSignal, WatchingSetup, PriceAlert
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,9 @@ class TelegramDeliveryManager:
     def enqueue_reject_alert(self, watching_setup_id: str, reasoning: str):
         self._q.put((watching_setup_id, 'REJECT', reasoning))
 
+    def enqueue_price_alert(self, alert_id: str, current_price: float):
+        self._q.put((alert_id, 'PRICE_ALERT', current_price))
+
     def _run_worker(self):
         while not self._stop_event.is_set():
             try:
@@ -79,7 +82,19 @@ class TelegramDeliveryManager:
                     reply_to = None
                     signal = None
 
-                    if alert_type == 'WATCHING':
+                    if alert_type == 'PRICE_ALERT':
+                        alert = PriceAlert.query.get(signal_id)
+                        if not alert:
+                            logger.error(f"PriceAlert {signal_id} not found for TG delivery")
+                            continue
+                        text = format_price_alert(alert, outcome_val)
+                        response = telegram_client.send_message(text, reply_to_message_id=None)
+                        if response:
+                            logger.info(f"Telegram price alert delivered for {signal_id}")
+                        else:
+                            logger.error(f"Failed to send price alert for {signal_id}")
+                        continue
+                    elif alert_type == 'WATCHING':
                         signal = WatchingSetup.query.get(signal_id)
                         if not signal:
                             logger.error(f"WatchingSetup {signal_id} not found for TG delivery")

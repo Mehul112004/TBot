@@ -10,6 +10,7 @@ from app.blueprints.sr_zones_bp import sr_zones_bp
 from app.blueprints.strategies_bp import strategies_bp
 from app.blueprints.signals_bp import signals_bp
 from app.blueprints.backtest_bp import backtest_bp
+from app.blueprints.alerts_bp import alerts_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
@@ -32,6 +33,7 @@ def create_app(test_config=None):
     app.register_blueprint(strategies_bp, url_prefix='/api/strategies')
     app.register_blueprint(signals_bp, url_prefix='/api/signals')
     app.register_blueprint(backtest_bp, url_prefix='/api/backtest')
+    app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
 
     with app.app_context():
         # Create tables
@@ -93,6 +95,10 @@ def create_app(test_config=None):
             from app.core.outcome_tracker import outcome_tracker
             outcome_tracker.set_app(app)
             outcome_tracker.rebuild_cache()
+
+            from app.core.price_alert_tracker import price_alert_tracker
+            price_alert_tracker.set_app(app)
+            price_alert_tracker.rebuild_cache()
         except Exception as e:
             print(f"[create_app] Background services init failed (DB may be unreachable): {e}")
 

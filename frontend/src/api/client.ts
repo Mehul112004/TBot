@@ -272,3 +272,22 @@ export const fetchLLMLogs = async (limit = 50, offset = 0): Promise<{ logs: LLMP
   const { data } = await apiClient.get('/signals/llm_logs', { params: { limit, offset } });
   return data;
 };
+
+// ---------- Price Alerts ----------
+
+import type { PriceAlert, PriceAlertCreate } from '../types/alerts';
+
+export const fetchAlerts = async (status?: string): Promise<{ alerts: PriceAlert[]; count: number }> => {
+  const { data } = await apiClient.get('/alerts', { params: status ? { status } : {} });
+  return data;
+};
+
+export const createAlert = async (payload: PriceAlertCreate): Promise<{ alert: PriceAlert }> => {
+  const { data } = await apiClient.post('/alerts', payload);
+  return data;
+};
+
+export const deleteAlert = async (alertId: string): Promise<{ alert: PriceAlert }> => {
+  const { data } = await apiClient.delete(`/alerts/${alertId}`);
+  return data;
+};

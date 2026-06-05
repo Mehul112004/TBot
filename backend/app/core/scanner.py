@@ -446,6 +446,13 @@ class LiveScanner:
         except Exception as e:
             logger.error(f"[LiveScanner] Error tracking outcome for {symbol}: {e}")
 
+        # Check against price alerts
+        try:
+            from app.core.price_alert_tracker import price_alert_tracker
+            price_alert_tracker.check_price(symbol, price)
+        except Exception as e:
+            logger.error(f"[LiveScanner] Error tracking price alerts for {symbol}: {e}")
+
         sse_manager.publish("price_update", {
             "session_id": session_id,
             "symbol": symbol,

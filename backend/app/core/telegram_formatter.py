@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta
-from app.models.db import ConfirmedSignal
+from app.models.db import ConfirmedSignal, PriceAlert
 
 _MD_SPECIAL = re.compile(r'([_*\[\]()~>#+\-=|{}.!])')
 
@@ -128,5 +128,34 @@ def format_rejected_signal(setup, reasoning: str) -> str:
 *Pair*      : {_escape_md(setup.symbol)}
 *Reasoning* : 
 {_escape_md(reasoning)}
+"""
+    return msg.strip()
+
+
+def format_price_alert(alert: PriceAlert, current_price: float) -> str:
+    direction_icon = "🔺" if alert.direction == "ABOVE" else "🔻"
+    direction_text = "crossed ABOVE" if alert.direction == "ABOVE" else "crossed BELOW"
+
+    dt = alert.triggered_at or alert.created_at
+    if dt:
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
+        dt = dt + timedelta(hours=5, minutes=30)
+        time_str = dt.strftime("%d %b %Y %H:%M IST")
+    else:
+        dt = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        time_str = dt.strftime("%d %b %Y %H:%M IST")
+
+    note_text = _escape_md(alert.note.strip()) if alert.note and alert.note.strip() else None
+
+    msg = f"""
+🔔 PRICE ALERT TRIGGERED
+
+*Pair*      : {_escape_md(alert.symbol)}
+*Alert*     : Price {direction_text} ${_escape_md(f"{alert.target_price:,.4f}")}
+*Current*   : ${_escape_md(f"{current_price:,.4f}")}
+*Type*      : {_escape_md(alert.alert_type)}{"  " + direction_icon}
+{("Note*      : " + note_text) if note_text else ""}
+⏱ {_escape_md(time_str)}
 """
     return msg.strip()

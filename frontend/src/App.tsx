@@ -5,7 +5,8 @@ import SignalFeed from './pages/SignalFeed/SignalFeed';
 import Backtest from './pages/Backtest/Backtest';
 import Charts from './pages/Charts/Charts';
 import LLMPrompts from './pages/LLMPrompts/LLMPrompts';
-import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X } from 'lucide-react';
+import PriceAlerts from './pages/PriceAlerts/PriceAlerts';
+import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X, Bell } from 'lucide-react';
 
 function NavLink({ to, icon: Icon, label }: { to: string; icon: React.ElementType; label: string }) {
   const location = useLocation();
@@ -40,6 +41,7 @@ function AppLayout() {
       '/charts': 'Charts | Crypto Signals',
       '/backtest': 'Backtest Engine | Crypto Signals',
       '/llm-prompts': 'LLM Prompts | Crypto Signals',
+      '/price-alerts': 'Price Alerts | Crypto Signals',
     };
     document.title = titles[location.pathname] || 'Crypto Signals';
   }, [location.pathname]);
@@ -68,6 +70,7 @@ function AppLayout() {
           <NavLink to="/backtest" icon={LineChart} label="Backtest Engine" />
           <NavLink to="/" icon={History} label="Historical Data" />
           <NavLink to="/llm-prompts" icon={Bot} label="LLM Prompts" />
+          <NavLink to="/price-alerts" icon={Bell} label="Price Alerts" />
         </nav>
       </aside>
 
@@ -90,6 +93,7 @@ function AppLayout() {
               <NavLink to="/backtest" icon={LineChart} label="Backtest Engine" />
               <NavLink to="/" icon={History} label="Historical Data" />
               <NavLink to="/llm-prompts" icon={Bot} label="LLM Prompts" />
+              <NavLink to="/price-alerts" icon={Bell} label="Price Alerts" />
             </nav>
           </aside>
         </div>
@@ -103,6 +107,7 @@ function AppLayout() {
           <Route path="/charts" element={<Charts />} />
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/llm-prompts" element={<LLMPrompts />} />
+          <Route path="/price-alerts" element={<PriceAlerts />} />
         </Routes>
       </main>
     </div>

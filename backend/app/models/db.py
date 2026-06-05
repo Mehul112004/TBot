@@ -410,6 +410,39 @@ class BacktestTrade(db.Model):
             'notes': self.notes,
         }
 
+class PriceAlert(db.Model):
+    __tablename__ = 'price_alerts'
+
+    id = db.Column(db.String(36), primary_key=True)
+    symbol = db.Column(db.String(50), nullable=False, index=True)
+    target_price = db.Column(db.Float, nullable=False)
+    direction = db.Column(db.String(10), nullable=False)          # ABOVE / BELOW
+    alert_type = db.Column(db.String(20), nullable=False)         # ONCE / EVERY_TIME
+    status = db.Column(db.String(20), default='ACTIVE')           # ACTIVE / TRIGGERED / CANCELLED
+    cross_state = db.Column(db.String(20), nullable=True)         # WAS_ABOVE / WAS_BELOW — tracks crossing side
+    note = db.Column(db.Text, default='')
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    triggered_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'symbol': self.symbol,
+            'target_price': self.target_price,
+            'direction': self.direction,
+            'alert_type': self.alert_type,
+            'status': self.status,
+            'cross_state': self.cross_state,
+            'note': self.note,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'triggered_at': self.triggered_at.isoformat() if self.triggered_at else None,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class LLMPromptLog(db.Model):
     """
     Logs every interaction with the LLM. 
