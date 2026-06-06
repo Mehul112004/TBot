@@ -18,6 +18,7 @@ import uuid
 from app.core.base_strategy import SetupSignal
 from app.core.llm_client import LLMClient
 from app.core.llm_context_builder import build_llm_context
+from app.core.market_data import fetch_market_data
 from app.core.telegram_queue import telegram_queue
 from app.core.outcome_tracker import outcome_tracker
 from app.core.sse import sse_manager
@@ -94,6 +95,10 @@ class LLMQueueManager:
                 # Build the structured context payload
                 if pre_df is not None:
                     try:
+                        # Fetch live market data (funding rate, OI, session)
+                        tf = signal.timeframe if hasattr(signal, 'timeframe') else '5m'
+                        market_data = fetch_market_data(signal.symbol, period=tf)
+
                         context = build_llm_context(
                             df=pre_df,
                             signal=signal.to_dict() if hasattr(signal, 'to_dict') else {
@@ -108,6 +113,7 @@ class LLMQueueManager:
                             },
                             symbol=signal.symbol,
                             htf_data=htf_data if htf_data else None,
+                            market_data=market_data,
                         )
                     except Exception as e:
                         logger.error(f"Failed to build LLM context: {e}")

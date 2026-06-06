@@ -22,6 +22,7 @@ def build_llm_context(
     signal: dict,  # SetupSignal.to_dict() or equivalent
     symbol: str,
     htf_data: Optional[Dict[str, pd.DataFrame]] = None,
+    market_data: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """
     Build the complete structured payload for LLM evaluation.
@@ -32,10 +33,11 @@ def build_llm_context(
         symbol: Trading pair (e.g. 'BTCUSDT')
         htf_data: Optional dict mapping timeframe string → pre-processed DataFrame
                   e.g. {'1h': df_1h, '4h': df_4h}
+        market_data: Optional dict with keys: funding_rate, oi_change, session
 
     Returns:
-        Dict with 5 top-level keys: signal_metadata, market_structure,
-        indicators, volume, htf_context, recent_price_action
+        Dict with 8 top-level keys: signal_metadata, risk_metrics, market_structure,
+        indicators, volume, htf_context, recent_price_action, classified_candles
     """
     last = df.iloc[-1]
     direction = signal.get('direction', 'LONG')
@@ -48,7 +50,7 @@ def build_llm_context(
         "risk_metrics": _build_risk_metrics(signal, indicators),
         "market_structure": market_structure,
         "indicators": indicators,
-        "volume": _build_volume_profile(df),
+        "volume": _build_volume_profile(df, market_data),
         "htf_context": _build_htf_context(df, htf_data),
         "recent_price_action": _build_recent_candles(df, n=20),
         "classified_candles": _build_classified_candles(df, indicators.get('atr'), n=20),
@@ -338,7 +340,7 @@ def _build_indicators(df: pd.DataFrame, direction: str) -> dict:
 #  Dimension 4: Volume & Order Flow
 # ═══════════════════════════════════════════════════════════════
 
-def _build_volume_profile(df: pd.DataFrame) -> dict:
+def _build_volume_profile(df: pd.DataFrame, market_data: Optional[dict] = None) -> dict:
     last = df.iloc[-1]
     result = {}
 
@@ -362,10 +364,17 @@ def _build_volume_profile(df: pd.DataFrame) -> dict:
     if vol_ma_20 > 0:
         result["volume_vs_recent"] = round(recent_vol / vol_ma_20, 2)
 
-    # Session context — not yet implemented (needs external data)
-    result["session"] = "N/A"
-    result["funding_rate"] = "N/A"
-    result["oi_change"] = "N/A"
+    # Live market data (funding rate, OI change, session)
+    if market_data:
+        result["session"] = market_data.get("session", "N/A")
+        fr = market_data.get("funding_rate")
+        result["funding_rate"] = f"{fr}%" if fr is not None else "N/A"
+        oi = market_data.get("oi_change")
+        result["oi_change"] = f"{oi:+.2f}%" if oi is not None else "N/A"
+    else:
+        result["session"] = "N/A"
+        result["funding_rate"] = "N/A"
+        result["oi_change"] = "N/A"
 
     return result
 
