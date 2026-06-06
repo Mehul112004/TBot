@@ -12,3 +12,4 @@ websocket-client
 gunicorn
 gevent
 pydantic
+google-genai

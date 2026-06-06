@@ -143,7 +143,7 @@ class LLMQueueManager:
                     if verdict_data:
                         logger.info(
                             f"[LLMQueue] Verdict={verdict_data.verdict} "
-                            f"confidence={verdict_data.confidence_score}/10 "
+                            f"confidence={verdict_data.confidence_score}/100 "
                             f"for {signal.symbol}/{signal.strategy_name}"
                         )
                         self._handle_verdict(watching_setup_id, signal, verdict_data)

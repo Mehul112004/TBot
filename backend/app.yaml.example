@@ -13,13 +13,19 @@ automatic_scaling:
 env_variables:
   FLASK_APP: run.py
   FLASK_ENV: production
-  LLM_PROVIDER: groq
-  LLM_API_URL: https://api.groq.com/openai/v1/chat/completions
-  LLM_MAX_TOKENS: "2500"
+  LLM_PROVIDER: vertex_ai
+  LLM_MAX_TOKENS: "65535"
   SIGNAL_EXPIRY_CANDLES: "3"
   DATABASE_URL: postgresql://postgres.[PROJECT_REF]:[YOUR_PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
   TELEGRAM_BOT_TOKEN: "[YOUR_TELEGRAM_BOT_TOKEN]"
   TELEGRAM_CHAT_ID: "[YOUR_TELEGRAM_CHAT_ID]"
-  GROQ_API_KEY: "[YOUR_GROQ_API_KEY]"
-  LLM_API_KEY: "[YOUR_LLM_API_KEY]"
   LLM_MODEL: "[YOUR_LLM_MODEL]"
+  VERTEX_PROJECT_ID: "[YOUR_VERTEX_PROJECT_ID]"
+  VERTEX_LOCATION: "asia-south1"
+  VERTEX_TEMPERATURE: "0.2"
+  # VERTEX_THINKING_LEVEL: "MEDIUM"
+
+  # Groq / OpenAI-compatible (legacy — uncomment and switch LLM_PROVIDER to use)
+  # LLM_API_URL: https://api.groq.com/openai/v1/chat/completions
+  # LLM_API_KEY: "[YOUR_LLM_API_KEY]"
+  # GROQ_API_KEY: "[YOUR_GROQ_API_KEY]"

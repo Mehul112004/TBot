@@ -11,6 +11,54 @@ def get_llm_provider() -> BaseLLMProvider:
     """
     provider_type = os.environ.get("LLM_PROVIDER", "lm_studio").lower()
     
+    # ── Vertex AI: Native google-genai SDK with ADC ──
+    if provider_type == "vertex_ai":
+        from app.core.llm_providers.vertex_ai import VertexAIProvider
+
+        default_model = "gemini-3.5-flash"
+
+        project_id = os.environ.get("VERTEX_PROJECT_ID", "")
+        location = os.environ.get("VERTEX_LOCATION", "us-central1")
+        model = os.environ.get("LLM_MODEL", default_model)
+
+        try:
+            max_tokens = int(os.environ.get("LLM_MAX_TOKENS", 65535))
+        except (ValueError, TypeError):
+            max_tokens = 65535
+
+        try:
+            temperature = float(os.environ.get("VERTEX_TEMPERATURE", "0.2"))
+        except (ValueError, TypeError):
+            temperature = 0.2
+
+        thinking_level = os.environ.get("VERTEX_THINKING_LEVEL", "") or None
+        if thinking_level:
+            thinking_level = thinking_level.upper()
+            if thinking_level not in ("LOW", "MEDIUM", "HIGH"):
+                logger.warning(
+                    f"[LLMFactory] Invalid VERTEX_THINKING_LEVEL '{thinking_level}'. "
+                    f"Expected LOW/MEDIUM/HIGH. Disabling thinking."
+                )
+                thinking_level = None
+
+        if not project_id:
+            logger.error("[LLMFactory] VERTEX_PROJECT_ID is required for vertex_ai provider.")
+            raise ValueError("VERTEX_PROJECT_ID environment variable is required for vertex_ai provider.")
+
+        logger.info(
+            f"[LLMFactory] Initializing LLM Provider: vertex_ai "
+            f"(Model: {model}) project={project_id} location={location}"
+        )
+
+        return VertexAIProvider(
+            project_id=project_id,
+            location=location,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            thinking_level=thinking_level,
+        )
+
     # Defaults depending on the provider type for easy swapping
     if provider_type == "groq":
         default_url = "https://api.groq.com/openai/v1/chat/completions"

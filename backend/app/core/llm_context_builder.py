@@ -40,13 +40,18 @@ def build_llm_context(
     last = df.iloc[-1]
     direction = signal.get('direction', 'LONG')
 
+    market_structure = _build_market_structure(df)
+    indicators = _build_indicators(df, direction)
+
     payload = {
         "signal_metadata": _build_signal_metadata(signal, symbol),
-        "market_structure": _build_market_structure(df),
-        "indicators": _build_indicators(df, direction),
+        "risk_metrics": _build_risk_metrics(signal, indicators),
+        "market_structure": market_structure,
+        "indicators": indicators,
         "volume": _build_volume_profile(df),
         "htf_context": _build_htf_context(df, htf_data),
         "recent_price_action": _build_recent_candles(df, n=20),
+        "classified_candles": _build_classified_candles(df, indicators.get('atr'), n=20),
     }
 
     return payload
@@ -72,7 +77,50 @@ def _build_signal_metadata(signal: dict, symbol: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  Dimension 2: Market Structure & Narrative
+#  Dimension 2: Computed Risk Metrics
+# ═══════════════════════════════════════════════════════════════
+
+def _build_risk_metrics(signal: dict, indicators: dict) -> dict:
+    entry = signal.get('entry')
+    sl = signal.get('sl')
+    tp1 = signal.get('tp1')
+    tp2 = signal.get('tp2')
+    direction = signal.get('direction', 'LONG')
+    atr = indicators.get('atr')
+
+    result = {
+        "atr_period": 14,
+        "atr_value": round(atr, 4) if atr else None,
+    }
+
+    if entry and sl and entry != sl:
+        sl_distance = abs(entry - sl)
+        result["sl_distance_pct"] = round(sl_distance / entry * 100, 2)
+
+        if atr and atr > 0:
+            result["sl_vs_atr"] = round(sl_distance / atr, 2)
+        else:
+            result["sl_vs_atr"] = None
+
+        if direction == 'SHORT':
+            if tp1 is not None and tp1 != 0:
+                result["rr_tp1"] = round((entry - tp1) / sl_distance, 2)
+            if tp2 is not None and tp2 != 0:
+                result["rr_tp2"] = round((entry - tp2) / sl_distance, 2)
+        else:
+            if tp1 is not None and tp1 != 0:
+                result["rr_tp1"] = round((tp1 - entry) / sl_distance, 2)
+            if tp2 is not None and tp2 != 0:
+                result["rr_tp2"] = round((tp2 - entry) / sl_distance, 2)
+    else:
+        result["sl_distance_pct"] = None
+        result["sl_vs_atr"] = None
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Dimension 3: Market Structure & Narrative
 # ═══════════════════════════════════════════════════════════════
 
 def _build_market_structure(df: pd.DataFrame) -> dict:
@@ -117,26 +165,35 @@ def _build_market_structure(df: pd.DataFrame) -> dict:
 
     # Order blocks
     if 'ob_active' in df.columns and last.get('ob_active'):
+        ob_upper = float(last['ob_upper']) if pd.notna(last.get('ob_upper')) else None
+        ob_lower = float(last['ob_lower']) if pd.notna(last.get('ob_lower')) else None
         result["nearest_order_block"] = {
             "active": True,
-            "upper": float(last['ob_upper']) if pd.notna(last.get('ob_upper')) else None,
-            "lower": float(last['ob_lower']) if pd.notna(last.get('ob_lower')) else None,
+            "upper": ob_upper,
+            "lower": ob_lower,
             "direction": str(last.get('ob_direction', 'N/A')),
         }
+        if ob_upper is not None and ob_lower is not None:
+            result["ob_level"] = f"{ob_lower:.2f}-{ob_upper:.2f}"
+        else:
+            result["ob_level"] = "N/A"
         # Distance from current price to OB
-        if pd.notna(last.get('ob_upper')) and pd.notna(last.get('ob_lower')):
+        if ob_upper is not None and ob_lower is not None:
             price = float(last['close'])
-            ob_mid = (float(last['ob_upper']) + float(last['ob_lower'])) / 2
+            ob_mid = (ob_upper + ob_lower) / 2
             result["distance_to_ob_pct"] = round(abs(price - ob_mid) / price * 100, 2)
     else:
         result["nearest_order_block"] = {"active": False}
+        result["ob_level"] = "N/A"
 
     # Fair Value Gaps
     if 'fvg_active' in df.columns and last.get('fvg_active'):
         result["fvg_status"] = "Active"
         fvg_upper = float(last['fvg_upper']) if pd.notna(last.get('fvg_upper')) else None
         fvg_lower = float(last['fvg_lower']) if pd.notna(last.get('fvg_lower')) else None
-        if fvg_upper and fvg_lower:
+        result["fvg_high"] = round(fvg_upper, 2) if fvg_upper is not None else None
+        result["fvg_low"] = round(fvg_lower, 2) if fvg_lower is not None else None
+        if fvg_upper is not None and fvg_lower is not None:
             price = float(last['close'])
             if price > fvg_upper:
                 result["fvg_position"] = "Below_Price"
@@ -146,6 +203,8 @@ def _build_market_structure(df: pd.DataFrame) -> dict:
                 result["fvg_position"] = "Inside_Price"
     else:
         result["fvg_status"] = "None"
+        result["fvg_high"] = None
+        result["fvg_low"] = None
 
     # Swing levels (from rolling pivots)
     result["recent_swing_high"] = round(float(df['high'].rolling(20).max().iloc[-1]), 2)
@@ -157,6 +216,11 @@ def _build_market_structure(df: pd.DataFrame) -> dict:
     if swing_range > 0:
         pos = (result["current_price"] - result["recent_swing_low"]) / swing_range
         result["price_position_in_range_pct"] = round(pos * 100, 1)
+
+    # Prior day high / low
+    pdh, pdl = _prior_day_levels(df)
+    result["pdh"] = round(pdh, 2) if pdh is not None else None
+    result["pdl"] = round(pdl, 2) if pdl is not None else None
 
     return result
 
@@ -205,6 +269,17 @@ def _build_indicators(df: pd.DataFrame, direction: str) -> dict:
     else:
         result["ema_alignment"] = "N/A"
 
+    # EMA 9 delta (% change over last 3 candles)
+    if 'ema_9' in df.columns and len(df) >= 4:
+        ema_now = float(df['ema_9'].iloc[-1]) if pd.notna(df['ema_9'].iloc[-1]) else None
+        ema_3_ago = float(df['ema_9'].iloc[-4]) if pd.notna(df['ema_9'].iloc[-4]) else None
+        if ema_now is not None and ema_3_ago is not None and ema_3_ago != 0:
+            result["ema9_delta"] = round((ema_now - ema_3_ago) / abs(ema_3_ago) * 100, 2)
+        else:
+            result["ema9_delta"] = None
+    else:
+        result["ema9_delta"] = None
+
     # MACD
     if 'macd_histogram' in df.columns and pd.notna(last.get('macd_histogram')):
         macd_hist = float(last['macd_histogram'])
@@ -251,8 +326,10 @@ def _build_indicators(df: pd.DataFrame, direction: str) -> dict:
             result["trend_strength"] = "Moderate"
         else:
             result["trend_strength"] = "Weak/None"
+        result["adx_label"] = result["trend_strength"]
     else:
         result["trend_strength"] = "N/A"
+        result["adx_label"] = "N/A"
 
     return result
 
@@ -285,6 +362,11 @@ def _build_volume_profile(df: pd.DataFrame) -> dict:
     if vol_ma_20 > 0:
         result["volume_vs_recent"] = round(recent_vol / vol_ma_20, 2)
 
+    # Session context — not yet implemented (needs external data)
+    result["session"] = "N/A"
+    result["funding_rate"] = "N/A"
+    result["oi_change"] = "N/A"
+
     return result
 
 
@@ -309,10 +391,14 @@ def _build_htf_context(
             if htf_df is None or len(htf_df) < 2:
                 continue
             htf_last = htf_df.iloc[-1]
+            htf_price = float(htf_last['close'])
+
+            # Bias
             bias = "Neutral"
             if 'ema_50' in htf_df.columns and pd.notna(htf_last.get('ema_50')):
-                bias = "Bullish" if float(htf_last['close']) > float(htf_last['ema_50']) else "Bearish"
+                bias = "Bullish" if htf_price > float(htf_last['ema_50']) else "Bearish"
 
+            # EMA stack
             ema_stack = "Mixed"
             if all(c in htf_df.columns for c in ['ema_9', 'ema_20', 'ema_50']):
                 e9, e20, e50 = float(htf_last['ema_9']), float(htf_last['ema_20']), float(htf_last['ema_50'])
@@ -326,7 +412,68 @@ def _build_htf_context(
             result[key] = bias
             result[f"{tf_name}_ema_stack"] = ema_stack
 
+            # ─ Structured summary for this HTF ─
+            struct_key = f"htf_{tf_name}_structure"
+            result[struct_key] = _build_htf_structure_summary(htf_df, bias, htf_price)
+
+    # Ensure keys exist for common timeframes even if htf_data absent
+    for tf in ('4h', '1d'):
+        key = f"htf_{tf}_structure"
+        if key not in result:
+            result[key] = "N/A"
+
     return result
+
+
+def _build_htf_structure_summary(htf_df: pd.DataFrame, bias: str, price: float) -> str:
+    """Build a one-line structural summary for a higher timeframe."""
+    parts = [bias.upper()]
+
+    # Last SMC event
+    if len(htf_df) >= 2:
+        htf_last = htf_df.iloc[-1]
+        last_event = "None"
+        if 'event_choch_bullish_recent' in htf_df.columns:
+            has_choch = (htf_last.get('event_choch_bullish_recent', False)
+                         or htf_last.get('event_choch_bearish_recent', False))
+            has_bos = (htf_last.get('event_bos_bullish_recent', False)
+                       or htf_last.get('event_bos_bearish_recent', False))
+            if has_choch:
+                last_event = "CHoCH"
+            elif has_bos:
+                last_event = "BOS"
+        parts.append(f"Last Event: {last_event}")
+
+        # Nearest active OB
+        if 'ob_active' in htf_df.columns and htf_last.get('ob_active'):
+            ob_upper = float(htf_last['ob_upper']) if pd.notna(htf_last.get('ob_upper')) else None
+            ob_lower = float(htf_last['ob_lower']) if pd.notna(htf_last.get('ob_lower')) else None
+            ob_dir = str(htf_last.get('ob_direction', ''))
+            if ob_upper is not None and ob_lower is not None and price > 0:
+                ob_mid = (ob_upper + ob_lower) / 2
+                dist_pct = round(abs(price - ob_mid) / price * 100, 2)
+                above_below = "above" if price > ob_mid else "below"
+                parts.append(
+                    f"Price {dist_pct}% {above_below} "
+                    f"{ob_dir.capitalize()} OB at {ob_lower:.0f}-{ob_upper:.0f}"
+                )
+
+        # Nearest active FVG
+        if 'fvg_active' in htf_df.columns and htf_last.get('fvg_active'):
+            fvg_upper = float(htf_last['fvg_upper']) if pd.notna(htf_last.get('fvg_upper')) else None
+            fvg_lower = float(htf_last['fvg_lower']) if pd.notna(htf_last.get('fvg_lower')) else None
+            if fvg_upper is not None and fvg_lower is not None:
+                if price > fvg_upper:
+                    fvg_pos = "below price"
+                elif price < fvg_lower:
+                    fvg_pos = "above price"
+                else:
+                    fvg_pos = "at current price"
+                parts.append(
+                    f"Active FVG {fvg_pos} ({fvg_lower:.0f}-{fvg_upper:.0f})"
+                )
+
+    return " | ".join(parts)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -396,3 +543,143 @@ def _detect_rsi_divergence(df: pd.DataFrame) -> str:
         return "Hidden_Bearish"
 
     return "None"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Candle Classification
+# ═══════════════════════════════════════════════════════════════
+
+def _build_classified_candles(df: pd.DataFrame, atr: Optional[float], n: int = 20) -> List[str]:
+    """Classify the last n candles into pattern labels with metric breakdowns."""
+    recent = df.iloc[-n:] if len(df) >= n else df
+    vol_mean = recent['volume'].mean() if 'volume' in recent.columns and len(recent) > 0 else 1
+
+    classified = []
+    for i in range(len(recent)):
+        row = recent.iloc[i]
+        o, h, l, c, v = (
+            float(row['open']), float(row['high']), float(row['low']),
+            float(row['close']), float(row['volume']),
+        )
+        time_str = str(row.get('open_time', ''))[:16] if pd.notna(row.get('open_time')) else ""
+        if time_str:
+            time_label = time_str[-5:] if len(time_str) >= 5 else time_str  # HH:MM
+        else:
+            time_label = "??:??"
+
+        prev_o, prev_c = None, None
+        if i > 0:
+            prev = recent.iloc[i - 1]
+            prev_o = float(prev['open'])
+            prev_c = float(prev['close'])
+
+        body_size = abs(c - o)
+        range_size = h - l
+        if range_size <= 0:
+            classified.append(f"[{time_label}] Flat Candle | Body: 0% | Top Wick: 0% | Btm Wick: 0% | Vol: 1.0x")
+            continue
+
+        body_pct = round(body_size / range_size * 100)
+        upper_wick = h - max(o, c)
+        lower_wick = min(o, c) - l
+        upper_wick_pct = round(upper_wick / range_size * 100)
+        lower_wick_pct = round(lower_wick / range_size * 100)
+        vol_ratio = round(v / vol_mean, 1) if vol_mean > 0 else 1.0
+        is_bullish = c > o
+        is_bearish = c < o
+
+        pattern = _classify_single_candle(
+            body_pct=body_pct,
+            upper_wick_pct=upper_wick_pct,
+            lower_wick_pct=lower_wick_pct,
+            is_bullish=is_bullish,
+            is_bearish=is_bearish,
+            body_size=body_size,
+            range_size=range_size,
+            o=o, c=c,
+            prev_o=prev_o, prev_c=prev_c,
+            atr=atr,
+        )
+
+        classified.append(
+            f"[{time_label}] {pattern} | Body: {body_pct}% | "
+            f"Top Wick: {upper_wick_pct}% | Btm Wick: {lower_wick_pct}% | "
+            f"Vol: {vol_ratio}x"
+        )
+
+    return classified
+
+
+def _classify_single_candle(
+    body_pct: int,
+    upper_wick_pct: int,
+    lower_wick_pct: int,
+    is_bullish: bool,
+    is_bearish: bool,
+    body_size: float,
+    range_size: float,
+    o: float, c: float,
+    prev_o: Optional[float], prev_c: Optional[float],
+    atr: Optional[float],
+) -> str:
+    """Classify a single candle into a pattern label."""
+
+    # Doji: very small body relative to range
+    if body_pct <= 10:
+        return "Doji"
+
+    # Engulfing patterns (require previous candle)
+    if prev_o is not None and prev_c is not None:
+        prev_body = abs(prev_c - prev_o)
+        prev_bull = prev_c > prev_o
+        prev_bear = prev_c < prev_o
+
+        # Bullish Engulfing: prev bearish, current bullish, body engulfs and larger
+        if is_bullish and prev_bear and c > prev_o and o < prev_c and body_size > prev_body:
+            return "Bullish Engulfing"
+
+        # Bearish Engulfing: prev bullish, current bearish, body engulfs and larger
+        if is_bearish and prev_bull and c < prev_o and o > prev_c and body_size > prev_body:
+            return "Bearish Engulfing"
+
+    # Pin Bars: long wick on one side, small body, opposite side tiny wick
+    if body_pct <= 35:
+        if lower_wick_pct >= 55 and upper_wick_pct <= 20:
+            return "Bullish Pin Bar"
+        if upper_wick_pct >= 55 and lower_wick_pct <= 20:
+            return "Bearish Pin Bar"
+
+    # Default
+    return "Standard Candle"
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Prior Day Levels
+# ═══════════════════════════════════════════════════════════════
+
+def _prior_day_levels(df: pd.DataFrame) -> tuple:
+    """Compute prior calendar day's high and low from the DataFrame."""
+    if 'open_time' not in df.columns and not hasattr(df.index, 'date'):
+        return None, None
+
+    try:
+        if 'open_time' in df.columns:
+            times = pd.to_datetime(df['open_time'])
+        else:
+            times = pd.to_datetime(df.index)
+
+        latest = times.iloc[-1]
+        latest_date = latest.normalize()
+        prior_date = latest_date - pd.Timedelta(days=1)
+
+        mask = (times >= prior_date) & (times < latest_date)
+        prior_df = df.loc[mask.values if hasattr(mask, 'values') else mask]
+
+        if len(prior_df) == 0:
+            return None, None
+
+        pdh = float(prior_df['high'].max())
+        pdl = float(prior_df['low'].min())
+        return pdh, pdl
+    except Exception:
+        return None, None

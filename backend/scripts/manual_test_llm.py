@@ -25,7 +25,8 @@ def test_manual():
     
     # 2. Check if it reports as online
     if not provider.ping_status():
-        print(f"⚠️ Provider {provider.model} at {provider.api_url} is unreachable. If using lm_studio, check if it's running.")
+        provider_info = getattr(provider, 'api_url', getattr(provider, 'project_id', 'unknown'))
+        print(f"⚠️ Provider {provider.model} at {provider_info} is unreachable.")
         return
         
     print(f"✅ Provider {provider.model} is online. Sending a test prompt...")
