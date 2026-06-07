@@ -465,6 +465,8 @@ class SREngine:
             zone['symbol'] = symbol
             zone['timeframe'] = timeframe
 
+        return merged_zones
+
     @classmethod
     def detect_zones_df(cls, df: pd.DataFrame, symbol: str,
                         timeframe: str, swing_lookback: int = 5) -> pd.DataFrame:

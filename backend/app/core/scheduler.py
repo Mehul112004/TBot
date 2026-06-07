@@ -133,7 +133,7 @@ def init_scheduler(app, scanner):
     """
     # --- Cold-start: delayed one-shot refresh (FIX-SCH-7) ---
     # Delay by 5 minutes to allow historical candle backfill to complete
-    run_time = datetime.now() + timedelta(minutes=5)
+    run_time = datetime.now() + timedelta(minutes=3)
     print(f"[Scheduler] Scheduling startup full refresh to run at {run_time} (5 minutes delay).", flush=True)
     
     scheduler.add_job(
