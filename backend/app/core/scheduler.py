@@ -11,6 +11,7 @@ coalesce + max_instances guards (FIX-SCH-10).
 """
 
 import atexit
+from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.sr_engine import SREngine
 from app.core.indicator_service import IndicatorService
@@ -20,7 +21,8 @@ from app.core.config import SUPPORTED_SYMBOLS
 # Timeframes for each job type
 FULL_REFRESH_4H_TIMEFRAMES = ['4h']
 FULL_REFRESH_1D_TIMEFRAMES = ['1d']
-MINOR_UPDATE_TIMEFRAMES = ['1h', '15m']
+MINOR_UPDATE_TIMEFRAMES = ['1h', '30m', '15m']
+ALL_TIMEFRAMES = list(set(FULL_REFRESH_4H_TIMEFRAMES + FULL_REFRESH_1D_TIMEFRAMES + MINOR_UPDATE_TIMEFRAMES))
 
 scheduler = BackgroundScheduler(daemon=True)
 
@@ -110,7 +112,7 @@ def startup_full_refresh(app, scanner):
             active_symbols = SUPPORTED_SYMBOLS
         print(f"[Scheduler] Startup full refresh for {active_symbols}...")
         for symbol in active_symbols:
-            for timeframe in FULL_REFRESH_4H_TIMEFRAMES + FULL_REFRESH_1D_TIMEFRAMES:
+            for timeframe in ALL_TIMEFRAMES:
                 try:
                     SREngine.full_refresh(symbol, timeframe)
                     IndicatorService.invalidate_cache(symbol, timeframe)
@@ -129,11 +131,15 @@ def init_scheduler(app, scanner):
         app: Flask application instance
         scanner: LiveScanner instance (for active session filtering)
     """
-    # --- Cold-start: immediate one-shot refresh (FIX-SCH-7) ---
+    # --- Cold-start: delayed one-shot refresh (FIX-SCH-7) ---
+    # Delay by 5 minutes to allow historical candle backfill to complete
+    run_time = datetime.now() + timedelta(minutes=5)
+    
     scheduler.add_job(
         func=startup_full_refresh,
         args=[app, scanner],
-        trigger='date',  # fire once immediately
+        trigger='date',  # fire once 5 minutes after startup
+        run_date=run_time,
         id='startup_full_refresh',
         replace_existing=True,
     )
