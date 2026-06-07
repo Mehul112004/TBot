@@ -570,10 +570,12 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
           crosshairMarkerVisible: false,
         });
 
-        const data: LineData[] = points.map((p) => ({
-          time: toUTC(p.time),
-          value: p.value,
-        }));
+        const data: LineData[] = points
+          .filter((p) => p.value !== null && p.value !== undefined && p.value !== "")
+          .map((p) => ({
+            time: toUTC(p.time),
+            value: typeof p.value === "string" ? parseFloat(p.value) : (p.value as number),
+          }));
 
         series.setData(data);
         emaSeriesRef.current[key] = series;
