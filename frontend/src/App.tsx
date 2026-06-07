@@ -3,10 +3,11 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react
 import HistoricalData from './pages/HistoricalData/HistoricalData';
 import SignalFeed from './pages/SignalFeed/SignalFeed';
 import Backtest from './pages/Backtest/Backtest';
+import BacktestAnalyser from './pages/BacktestAnalyser/BacktestAnalyser';
 import Charts from './pages/Charts/Charts';
 import LLMPrompts from './pages/LLMPrompts/LLMPrompts';
 import PriceAlerts from './pages/PriceAlerts/PriceAlerts';
-import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X, Bell } from 'lucide-react';
+import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X, Bell, FileSearch } from 'lucide-react';
 
 function NavLink({ to, icon: Icon, label }: { to: string; icon: React.ElementType; label: string }) {
   const location = useLocation();
@@ -40,7 +41,8 @@ function AppLayout() {
       '/signal-feed': 'Signal Feed | Crypto Signals',
       '/charts': 'Charts | Crypto Signals',
       '/backtest': 'Backtest Engine | Crypto Signals',
-      '/llm-prompts': 'LLM Prompts | Crypto Signals',
+      '/backtest-analyser': 'Backtest Analyser | Crypto Signals',
+      '/llm-prompts': 'LLMPrompts | Crypto Signals',
       '/price-alerts': 'Price Alerts | Crypto Signals',
     };
     document.title = titles[location.pathname] || 'Crypto Signals';
@@ -68,6 +70,7 @@ function AppLayout() {
           <NavLink to="/signal-feed" icon={LayoutDashboard} label="Signal Feed" />
           <NavLink to="/charts" icon={CandlestickChart} label="Charts" />
           <NavLink to="/backtest" icon={LineChart} label="Backtest Engine" />
+          <NavLink to="/backtest-analyser" icon={FileSearch} label="Backtest Analyser" />
           <NavLink to="/" icon={History} label="Historical Data" />
           <NavLink to="/llm-prompts" icon={Bot} label="LLM Prompts" />
           <NavLink to="/price-alerts" icon={Bell} label="Price Alerts" />
@@ -91,6 +94,7 @@ function AppLayout() {
               <NavLink to="/signal-feed" icon={LayoutDashboard} label="Signal Feed" />
               <NavLink to="/charts" icon={CandlestickChart} label="Charts" />
               <NavLink to="/backtest" icon={LineChart} label="Backtest Engine" />
+              <NavLink to="/backtest-analyser" icon={FileSearch} label="Backtest Analyser" />
               <NavLink to="/" icon={History} label="Historical Data" />
               <NavLink to="/llm-prompts" icon={Bot} label="LLM Prompts" />
               <NavLink to="/price-alerts" icon={Bell} label="Price Alerts" />
@@ -106,6 +110,7 @@ function AppLayout() {
           <Route path="/signal-feed" element={<SignalFeed />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/backtest" element={<Backtest />} />
+          <Route path="/backtest-analyser" element={<BacktestAnalyser />} />
           <Route path="/llm-prompts" element={<LLMPrompts />} />
           <Route path="/price-alerts" element={<PriceAlerts />} />
         </Routes>
