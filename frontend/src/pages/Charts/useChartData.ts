@@ -15,6 +15,7 @@ export interface ChartDataState {
   };
   loading: boolean;
   error: string | null;
+  currentRegime?: string;
 }
 
 const EMPTY_EMA: ChartDataState['emaLines'] = { ema_9: [], ema_21: [], ema_50: [], ema_200: [] };
@@ -118,6 +119,7 @@ export function useChartData(
         emaLines,
         loading: false,
         error: null,
+        currentRegime: smcResult?.current_regime,
       });
 
       // Reset live tick on fresh load, but compute closeTime from candle data

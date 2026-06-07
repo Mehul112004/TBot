@@ -11,6 +11,9 @@ import {
   type UTCTimestamp,
   type HistogramData,
   type LineData,
+  type SeriesMarker,
+  type Time,
+  createSeriesMarkers,
 } from "lightweight-charts";
 import type {
   CandleData,
@@ -58,6 +61,7 @@ interface CandleChartProps {
   showSRZones: boolean;
   smcZones: SMCZone[];
   showSMCZones: boolean;
+  currentRegime?: string;
   emaLines: {
     ema_9: IndicatorSeriesPoint[];
     ema_21: IndicatorSeriesPoint[];
@@ -84,6 +88,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
   showSRZones,
   smcZones,
   showSMCZones,
+  currentRegime,
   emaLines,
   showEMA,
   emaVisible,
@@ -103,6 +108,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
     ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]>([]);
   const smcPriceLinesRef = useRef<
     ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]>([]);
+  const seriesMarkersRef = useRef<any>(null);
   const legendRef = useRef<HTMLDivElement>(null);
   const chartInitialized = useRef(false);
   const lastChartConfig = useRef<string>("");
@@ -168,6 +174,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
       emaSeriesRef.current = {};
       srPriceLinesRef.current = [];
       smcPriceLinesRef.current = [];
+      seriesMarkersRef.current = null;
     }
 
     const chart = createChart(containerRef.current, {
@@ -218,6 +225,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
       priceFormat: { type: "price", precision: 2, minMove: 0.01 },
     });
     candleSeriesRef.current = candleSeries;
+    seriesMarkersRef.current = createSeriesMarkers(candleSeries);
 
     // Volume histogram (overlaid at bottom)
     const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -272,6 +280,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
         emaSeriesRef.current = {};
         srPriceLinesRef.current = [];
         smcPriceLinesRef.current = [];
+        seriesMarkersRef.current = null;
         chartInitialized.current = false;
       }
     };
@@ -417,15 +426,28 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
     // Deduplicate zones by exact type + direction + upper + lower
     const seen = new Set<string>();
     const uniqueZones = smcZones.filter((z) => {
-      if (z.type === "event" || !z.upper || !z.lower) return false;
+      if (z.type === "event") return true; // Events are allowed, no deduplication needed
+      if (!z.upper || !z.lower) return false;
       const key = `${z.type}_${z.direction}_${z.upper}_${z.lower}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
 
+    const markers: SeriesMarker<Time>[] = [];
+
     for (const zone of uniqueZones) {
-      // Events don't have upper/lower — skip rendering as lines
+      if (zone.type === 'event' && zone.time) {
+        markers.push({
+          time: toUTC(zone.time),
+          position: zone.direction === 'bullish' ? 'belowBar' : (zone.direction === 'bearish' ? 'aboveBar' : 'inBar'),
+          color: zone.direction === 'bullish' ? '#10b981' : (zone.direction === 'bearish' ? '#ef4444' : '#a78bfa'),
+          shape: zone.direction === 'bullish' ? 'arrowUp' : (zone.direction === 'bearish' ? 'arrowDown' : 'circle'),
+          text: zone.label || 'Event',
+        });
+        continue;
+      }
+      // Skip events without time (e.g. from older data shape)
       if (zone.type === 'event') continue;
       if (!zone.upper || !zone.lower) continue;
 
@@ -470,6 +492,10 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
       });
       smcPriceLinesRef.current.push(lowerLine);
     }
+    
+    // Sort markers by time as required by lightweight-charts
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
+    seriesMarkersRef.current?.setMarkers(markers);
   }, [showSMCZones, smcZones]);
 
   /* ───────────────────── EMA line overlays ───────────────────── */
@@ -604,12 +630,12 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
         id="ohlcv-legend"
       />
 
-      {/* Candle countdown timer */}
-      {countdown && (
-        <div
-          className="top-3 right-4 z-20 absolute pointer-events-none flex items-center gap-1.5"
-          id="candle-countdown"
-        >
+      {/* Candle countdown timer & Regime */}
+      <div
+        className="top-3 right-4 z-20 absolute pointer-events-none flex flex-col items-end gap-2"
+        id="candle-info-stack"
+      >
+        {countdown && (
           <div
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-mono text-xs font-semibold tabular-nums"
             style={{
@@ -625,8 +651,26 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(({
             </svg>
             {countdown}
           </div>
-        </div>
-      )}
+        )}
+        
+        {currentRegime && (
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border font-mono text-xs font-bold uppercase tracking-wider"
+            style={{
+              background: "rgba(15, 23, 42, 0.85)",
+              borderColor: currentRegime.includes('UP') ? "rgba(16, 185, 129, 0.4)" : 
+                           currentRegime.includes('DOWN') ? "rgba(239, 68, 68, 0.4)" : 
+                           "rgba(167, 139, 250, 0.4)",
+              color: currentRegime.includes('UP') ? "#10b981" : 
+                     currentRegime.includes('DOWN') ? "#ef4444" : 
+                     "#a78bfa",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            {currentRegime.replace('_', ' ')}
+          </div>
+        )}
+      </div>
 
       {/* SMC zone badge */}
       {showSMCZones && smcZones.length > 0 && (

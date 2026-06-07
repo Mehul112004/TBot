@@ -155,6 +155,7 @@ export interface SMCZone {
   volume?: number;
   created_at?: string;
   active: boolean;
+  time?: string;
 }
 
 export interface SMCZonesResponse {
@@ -163,6 +164,7 @@ export interface SMCZonesResponse {
   zones: SMCZone[];
   count: number;
   candles_scanned: number;
+  current_regime?: string;
 }
 
 export const fetchSMCZones = async (

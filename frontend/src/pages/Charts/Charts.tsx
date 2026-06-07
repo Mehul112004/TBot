@@ -36,6 +36,7 @@ export default function Charts() {
     updateLastCandle,
     liveTick,
     closeTime,
+    currentRegime,
   } = useChartData(symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones);
 
   /* ─── SSE live candle + price updates ─── */
@@ -150,6 +151,7 @@ export default function Charts() {
         timeframe={timeframe}
         liveTick={liveTick}
         closeTime={closeTime}
+        currentRegime={currentRegime}
       />
     </div>
   );

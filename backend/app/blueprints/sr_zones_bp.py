@@ -165,6 +165,16 @@ def get_smc_zones():
         df = detect_choch(df)
         df = detect_liquidity_sweep(df)
 
+        from app.core.indicators import compute_ema, compute_adx, compute_bollinger
+        for p in [50, 100, 200]:
+            df[f'ema_{p}'] = compute_ema(df['close'], period=p)
+        df['adx'] = compute_adx(df['high'], df['low'], df['close'])
+        bb = compute_bollinger(df['close'])
+        df['bb_width'] = bb['bb_width']
+        
+        from app.core.market_regime import detect_market_regime
+        df = detect_market_regime(df)
+
         import numpy as np
         zones = []
 
@@ -203,17 +213,33 @@ def get_smc_zones():
                 'active': True,
             })
 
-        # ── Recent ChoCh/BOS events ──
-        for col, label in [('event_choch_bullish_recent', 'ChoCh Bullish'),
-                            ('event_choch_bearish_recent', 'ChoCh Bearish'),
-                            ('event_bos_bullish_recent', 'BOS Bullish'),
-                            ('event_bos_bearish_recent', 'BOS Bearish')]:
-            if col in df.columns and df.iloc[-1].get(col, False):
+        # ── Historical ChoCh/BOS events and Regime changes ──
+        prev_regime = None
+        for idx, row in df.iterrows():
+            open_time_str = str(row['open_time'])
+            
+            if row.get('event_choch_bullish', False):
+                zones.append({'type': 'event', 'label': 'CHoCH', 'direction': 'bullish', 'active': False, 'time': open_time_str})
+            elif row.get('event_choch_bearish', False):
+                zones.append({'type': 'event', 'label': 'CHoCH', 'direction': 'bearish', 'active': False, 'time': open_time_str})
+                
+            if row.get('event_bos_bullish', False):
+                zones.append({'type': 'event', 'label': 'BoS', 'direction': 'bullish', 'active': False, 'time': open_time_str})
+            elif row.get('event_bos_bearish', False):
+                zones.append({'type': 'event', 'label': 'BoS', 'direction': 'bearish', 'active': False, 'time': open_time_str})
+                
+            current_regime = row.get('regime', 'UNKNOWN')
+            if current_regime != prev_regime and prev_regime is not None:
+                # Determine direction for color coding
+                direction = 'bullish' if 'UP' in current_regime else ('bearish' if 'DOWN' in current_regime else None)
                 zones.append({
-                    'type': 'event',
-                    'label': label,
-                    'active': True,
+                    'type': 'event', 
+                    'label': f'Regime: {current_regime}', 
+                    'direction': direction, 
+                    'active': False, 
+                    'time': open_time_str
                 })
+            prev_regime = current_regime
 
         return jsonify({
             'symbol': symbol,
@@ -221,6 +247,7 @@ def get_smc_zones():
             'zones': zones,
             'count': len(zones),
             'candles_scanned': len(df),
+            'current_regime': current_regime if 'current_regime' in locals() else 'UNKNOWN'
         }), 200
 
     except Exception as e:
