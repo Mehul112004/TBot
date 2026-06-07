@@ -60,12 +60,13 @@ class TestExtractFVGs:
         df = create_mitigated_fvg_df()
         df = extract_fvgs(df, mitigation_type='wick')
 
-        # Only verify if an FVG was actually detected
-        if df['fvg_active'].any():
-            mitigated_idx = df[df['low'] <= df['fvg_lower']].index[0]
-            assert not df.loc[mitigated_idx, 'fvg_active'], "FVG still active after wick mitigation"
-            assert df.loc[mitigated_idx:, 'fvg_active'].sum() == 0, \
-                f"FVG re-activated after mitigation: {df.loc[mitigated_idx:, 'fvg_active'].sum()} rows"
+        # FVG forms at candles 0-2 (upper=103, lower=102), active from candle 3
+        # Candle 4: low=101 breaches fvg_lower=102 → mitigated
+        assert df.loc[3, 'fvg_active'], "FVG should be active on candle 3 (pre-mitigation)"
+        assert not df.loc[4, 'fvg_active'], "FVG should be mitigated on candle 4 (wick breach)"
+        # No active FVGs from mitigation onward
+        assert df.loc[4:, 'fvg_active'].sum() == 0, \
+            f"FVG re-activated after mitigation: {df.loc[4:, 'fvg_active'].sum()} rows"
 
     def test_mitigation_body_not_triggered_by_wick(self):
         """FVG NOT mitigated by wick when mitigation_type='body'."""

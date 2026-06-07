@@ -10,10 +10,15 @@ Regime definitions:
   - RANGING:       ADX < 20 or no clear structure
   - CHOPPY:        ADX 20-25, mixed signals
 
-Volatility regime:
-  - LOW:     BB width < 20-period average
-  - NORMAL:  BB width within 1 std of average
-  - HIGH:    BB width > 1 std above average
+Regime hysteresis:
+  Once a trend is confirmed, it persists until a stronger exit condition fires
+  (price crosses EMA 100 or ADX drops below 15). This prevents pullbacks to
+  the 50 EMA from falsely dropping the regime to CHOPPY.
+
+Volatility regime (percentile-based):
+  - LOW:     BB width below 20th percentile of last 100 bars
+  - NORMAL:  BB width between 20th and 80th percentile
+  - HIGH:    BB width above 80th percentile of last 100 bars
 """
 
 import numpy as np
@@ -58,24 +63,64 @@ def detect_market_regime(df: pd.DataFrame) -> pd.DataFrame:
     # ── Price vs EMAs ──
     price_above_50 = df['close'] > df['ema_50']
     price_below_50 = df['close'] < df['ema_50']
+    price_above_100 = df['close'] > df['ema_100']
+    price_below_100 = df['close'] < df['ema_100']
 
-    # ── Classify regime ──
-    # Strong bull trend: ADX >= 25, bullish EMA stack, price above EMA50
-    bull_regime = strong_trend & bullish_stack & price_above_50
-    # Strong bear trend: ADX >= 25, bearish EMA stack, price below EMA50
-    bear_regime = strong_trend & bearish_stack & price_below_50
-    # Weak bull: ADX 20-25 or missing EMA confirmation
-    weak_bull = adx_ok & ~bull_regime & ~bear_regime & price_above_50 & bullish_stack
-    # Weak bear
-    weak_bear = adx_ok & ~bull_regime & ~bear_regime & price_below_50 & bearish_stack
-    # Choppy: ADX 20-25 with no clear EMA alignment
-    choppy = adx_ok & ~bull_regime & ~bear_regime & ~weak_bull & ~weak_bear
+    # ── Classify regime with hysteresis ──
+    # Use a state machine: once a trend is confirmed, it persists until
+    # a strong exit condition fires, not just a pullback to EMA 50.
+    regimes = np.full(n, 'RANGING', dtype=object)
+    prev_regime = 'RANGING'
 
-    df.loc[bull_regime, 'regime'] = 'TRENDING_UP'
-    df.loc[weak_bull, 'regime'] = 'TRENDING_UP'
-    df.loc[bear_regime, 'regime'] = 'TRENDING_DOWN'
-    df.loc[weak_bear, 'regime'] = 'TRENDING_DOWN'
-    df.loc[choppy, 'regime'] = 'CHOPPY'
+    for i in range(n):
+        if not emas_ok.iloc[i]:
+            regimes[i] = prev_regime if prev_regime != 'RANGING' else 'RANGING'
+            continue
+
+        is_strong = strong_trend.iloc[i] if adx_ok.iloc[i] else False
+        is_adx_ok = adx_ok.iloc[i]
+        is_bull_stack = bullish_stack.iloc[i]
+        is_bear_stack = bearish_stack.iloc[i]
+        is_above_50 = price_above_50.iloc[i]
+        is_below_50 = price_below_50.iloc[i]
+        is_above_100 = price_above_100.iloc[i]
+        is_below_100 = price_below_100.iloc[i]
+
+        # ── Entry conditions (strict) ──
+        if is_strong and is_bull_stack and is_above_50:
+            regimes[i] = 'TRENDING_UP'
+        elif is_strong and is_bear_stack and is_below_50:
+            regimes[i] = 'TRENDING_DOWN'
+        elif is_adx_ok and is_bull_stack and is_above_50:
+            regimes[i] = 'TRENDING_UP'
+        elif is_adx_ok and is_bear_stack and is_below_50:
+            regimes[i] = 'TRENDING_DOWN'
+
+        # ── Hysteresis: maintain trend during pullbacks ──
+        elif prev_regime == 'TRENDING_UP' and is_bull_stack and is_above_100:
+            # Price pulled back below EMA 50 but is still above EMA 100
+            # and ADX hasn't collapsed — maintain the trend
+            adx_val = df['adx'].iloc[i]
+            if pd.notna(adx_val) and adx_val >= 15:
+                regimes[i] = 'TRENDING_UP'
+            else:
+                regimes[i] = 'CHOPPY'
+        elif prev_regime == 'TRENDING_DOWN' and is_bear_stack and is_below_100:
+            adx_val = df['adx'].iloc[i]
+            if pd.notna(adx_val) and adx_val >= 15:
+                regimes[i] = 'TRENDING_DOWN'
+            else:
+                regimes[i] = 'CHOPPY'
+
+        # ── Choppy: ADX in range but no clear alignment ──
+        elif is_adx_ok:
+            regimes[i] = 'CHOPPY'
+        else:
+            regimes[i] = 'RANGING'
+
+        prev_regime = regimes[i]
+
+    df['regime'] = regimes
 
     # ── Regime strength (0-1) ──
     # Based on ADX normalized + EMA stack conviction
@@ -86,18 +131,31 @@ def detect_market_regime(df: pd.DataFrame) -> pd.DataFrame:
         0.2  # Low strength for ranging/choppy
     )
 
-    # ── Volatility regime (BB width based) ──
+    # ── Volatility regime (percentile-based) ──
+    vol_lookback = 100
     if 'bb_width' in df.columns and df['bb_width'].notna().sum() >= 20:
-        bb_mean = df['bb_width'].rolling(20).mean()
-        bb_std = df['bb_width'].rolling(20).std().fillna(0)
-        df['volatility_regime'] = np.where(
-            df['bb_width'].notna() & bb_mean.notna(),
-            np.where(
-                df['bb_width'] > bb_mean + bb_std, 'HIGH',
-                np.where(df['bb_width'] < bb_mean - bb_std, 'LOW', 'NORMAL')
-            ),
-            'NORMAL'
-        )
+        vol_regimes = np.full(n, 'NORMAL', dtype=object)
+        bb_vals = df['bb_width'].values
+
+        for i in range(n):
+            if pd.isna(bb_vals[i]):
+                continue
+            # Use the last `vol_lookback` bars (or all available)
+            start = max(0, i - vol_lookback + 1)
+            window = bb_vals[start:i + 1]
+            valid = window[~np.isnan(window)]
+            if len(valid) < 20:
+                continue
+
+            pct = np.sum(valid < bb_vals[i]) / len(valid)
+            if pct >= 0.80:
+                vol_regimes[i] = 'HIGH'
+            elif pct <= 0.20:
+                vol_regimes[i] = 'LOW'
+            else:
+                vol_regimes[i] = 'NORMAL'
+
+        df['volatility_regime'] = vol_regimes
 
     # ── Structural bias (from price vs EMAs) ──
     df.loc[bullish_stack & price_above_50, 'structural_bias'] = 'BULLISH'
