@@ -68,11 +68,12 @@ export interface IndicatorLatest {
   bb_width: number | null;
   atr_14: number | null;
   volume_ma_20: number | null;
+  regime?: string;
 }
 
 export interface IndicatorSeriesPoint {
   time: string;
-  value: number;
+  value: number | string;
 }
 
 export interface IndicatorResponse {
@@ -164,7 +165,6 @@ export interface SMCZonesResponse {
   zones: SMCZone[];
   count: number;
   candles_scanned: number;
-  current_regime?: string;
 }
 
 export const fetchSMCZones = async (

@@ -11,6 +11,7 @@ export interface ChartDataState {
     ema_9: IndicatorSeriesPoint[];
     ema_21: IndicatorSeriesPoint[];
     ema_50: IndicatorSeriesPoint[];
+    ema_100: IndicatorSeriesPoint[];
     ema_200: IndicatorSeriesPoint[];
   };
   loading: boolean;
@@ -18,7 +19,7 @@ export interface ChartDataState {
   currentRegime?: string;
 }
 
-const EMPTY_EMA: ChartDataState['emaLines'] = { ema_9: [], ema_21: [], ema_50: [], ema_200: [] };
+const EMPTY_EMA: ChartDataState['emaLines'] = { ema_9: [], ema_21: [], ema_50: [], ema_100: [], ema_200: [] };
 
 const TF_MS: Record<string, number> = {
   '1s': 1_000,
@@ -108,18 +109,40 @@ export function useChartData(
           ema_9: indicatorResult.series['ema_9'] || [],
           ema_21: indicatorResult.series['ema_21'] || [],
           ema_50: indicatorResult.series['ema_50'] || [],
+          ema_100: indicatorResult.series['ema_100'] || [],
           ema_200: indicatorResult.series['ema_200'] || [],
         };
+      }
+
+      // Construct synthetic regime events
+      let smcZones = smcResult?.zones || [];
+      if (indicatorResult && indicatorResult.series && indicatorResult.series['regime']) {
+        const regimeSeries = indicatorResult.series['regime'];
+        let prevRegime: string | null = null;
+        for (const pt of regimeSeries) {
+          const currentRegime = pt.value as string;
+          if (currentRegime && currentRegime !== prevRegime && prevRegime !== null && currentRegime !== 'UNKNOWN') {
+            const direction = currentRegime.includes('UP') ? 'bullish' : (currentRegime.includes('DOWN') ? 'bearish' : undefined);
+            smcZones.push({
+              type: 'event',
+              label: `Regime: ${currentRegime}`,
+              direction,
+              active: false,
+              time: pt.time
+            });
+          }
+          prevRegime = currentRegime || 'UNKNOWN';
+        }
       }
 
       setState({
         candles: candleResult.candles,
         srZones: srResult?.zones || [],
-        smcZones: smcResult?.zones || [],
+        smcZones: smcZones,
         emaLines,
         loading: false,
         error: null,
-        currentRegime: smcResult?.current_regime,
+        currentRegime: indicatorResult?.latest?.regime,
       });
 
       // Reset live tick on fresh load, but compute closeTime from candle data

@@ -22,7 +22,9 @@ from app.core.indicators import (
     compute_atr,
     compute_keltner,
     compute_volume_ma,
+    compute_adx,
 )
+from app.core.market_regime import detect_market_regime
 
 
 class IndicatorService:
@@ -143,6 +145,17 @@ class IndicatorService:
         kc = compute_keltner(highs, lows, closes, 20, 10, 1.5)
         atr_14 = compute_atr(highs, lows, closes, 14)
         vol_ma_20 = compute_volume_ma(volumes, 20)
+        adx_14 = compute_adx(highs, lows, closes, 14)
+
+        # ── Market Regime ──
+        # detect_market_regime requires ema_50, ema_100, ema_200, adx, bb_width in df
+        df['ema_50'] = ema_50
+        df['ema_100'] = ema_100
+        df['ema_200'] = ema_200
+        df['adx'] = adx_14
+        df['bb_width'] = bb['bb_width']
+        df = detect_market_regime(df)
+        regime = df['regime']
 
         def _safe_last(series: pd.Series) -> Optional[float]:
             val = series.iloc[-1]
@@ -168,6 +181,8 @@ class IndicatorService:
             'kc_lower': _safe_last(kc['kc_lower']),
             'atr_14': _safe_last(atr_14),
             'volume_ma_20': _safe_last(vol_ma_20),
+            'adx_14': _safe_last(adx_14),
+            'regime': regime.iloc[-1] if not regime.empty else 'UNKNOWN',
         }
 
         timestamps = df['open_time'].dt.strftime('%Y-%m-%dT%H:%M:%SZ').tolist()
@@ -176,7 +191,7 @@ class IndicatorService:
             result = []
             for i, val in enumerate(series):
                 if pd.notna(val):
-                    result.append({'time': timestamps[i], 'value': round(float(val), 6)})
+                    result.append({'time': timestamps[i], 'value': val if isinstance(val, str) else round(float(val), 6)})
                 else:
                     result.append({'time': timestamps[i], 'value': None})
             return result
@@ -199,6 +214,8 @@ class IndicatorService:
             'kc_lower': _series_to_list(kc['kc_lower']),
             'atr_14': _series_to_list(atr_14),
             'volume_ma_20': _series_to_list(vol_ma_20),
+            'adx_14': _series_to_list(adx_14),
+            'regime': _series_to_list(regime),
         }
 
         result = {

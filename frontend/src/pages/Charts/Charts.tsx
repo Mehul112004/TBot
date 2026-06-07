@@ -21,6 +21,7 @@ export default function Charts() {
     ema_9: true,
     ema_21: true,
     ema_50: false,
+    ema_100: false,
     ema_200: true,
   });
 

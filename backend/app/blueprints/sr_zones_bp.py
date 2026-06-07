@@ -165,16 +165,6 @@ def get_smc_zones():
         df = detect_choch(df)
         df = detect_liquidity_sweep(df)
 
-        from app.core.indicators import compute_ema, compute_adx, compute_bollinger
-        for p in [50, 100, 200]:
-            df[f'ema_{p}'] = compute_ema(df['close'], period=p)
-        df['adx'] = compute_adx(df['high'], df['low'], df['close'])
-        bb = compute_bollinger(df['close'])
-        df['bb_width'] = bb['bb_width']
-        
-        from app.core.market_regime import detect_market_regime
-        df = detect_market_regime(df)
-
         import numpy as np
         zones = []
 
@@ -227,27 +217,13 @@ def get_smc_zones():
                 zones.append({'type': 'event', 'label': 'BoS', 'direction': 'bullish', 'active': False, 'time': open_time_str})
             elif row.get('event_bos_bearish', False):
                 zones.append({'type': 'event', 'label': 'BoS', 'direction': 'bearish', 'active': False, 'time': open_time_str})
-                
-            current_regime = row.get('regime', 'UNKNOWN')
-            if current_regime != prev_regime and prev_regime is not None:
-                # Determine direction for color coding
-                direction = 'bullish' if 'UP' in current_regime else ('bearish' if 'DOWN' in current_regime else None)
-                zones.append({
-                    'type': 'event', 
-                    'label': f'Regime: {current_regime}', 
-                    'direction': direction, 
-                    'active': False, 
-                    'time': open_time_str
-                })
-            prev_regime = current_regime
 
         return jsonify({
             'symbol': symbol,
             'timeframe': timeframe,
             'zones': zones,
             'count': len(zones),
-            'candles_scanned': len(df),
-            'current_regime': current_regime if 'current_regime' in locals() else 'UNKNOWN'
+            'candles_scanned': len(df)
         }), 200
 
     except Exception as e:
