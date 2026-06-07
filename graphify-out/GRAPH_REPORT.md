@@ -1,7 +1,7 @@
 # Graph Report - /Users/artemis/Mehul/TBot  (2026-06-07)
 
 ## Corpus Check
-- 135 files · ~267,897 words
+- 135 files · ~329,692 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -837,11 +837,11 @@ Nodes (1): Favicon
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `SetupSignal` connect `Community 0` to `Community 1`, `Community 3`, `Community 4`, `Community 5`, `Community 7`, `Community 9`, `Community 13`, `Community 14`?**
-  _High betweenness centrality (0.165) - this node is a cross-community bridge._
+  _High betweenness centrality (0.156) - this node is a cross-community bridge._
 - **Why does `Candle` connect `Community 0` to `Community 1`, `Community 2`, `Community 3`, `Community 4`, `Community 7`, `Community 9`, `Community 13`?**
-  _High betweenness centrality (0.155) - this node is a cross-community bridge._
-- **Why does `SREngine` connect `Community 1` to `Community 0`, `Community 2`, `Community 5`, `Community 9`, `Community 14`?**
-  _High betweenness centrality (0.153) - this node is a cross-community bridge._
+  _High betweenness centrality (0.141) - this node is a cross-community bridge._
+- **Why does `BaseStrategy` connect `Community 0` to `Community 1`, `Community 3`, `Community 5`, `Community 6`, `Community 9`, `Community 10`, `Community 13`?**
+  _High betweenness centrality (0.104) - this node is a cross-community bridge._
 - **Are the 394 inferred relationships involving `SetupSignal` (e.g. with `LLMQueueManager` and `LLM Queue Manager v2 — Structured Context Evaluation  Background worker that eva`) actually correct?**
   _`SetupSignal` has 394 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 365 inferred relationships involving `Candle` (e.g. with `AnalysisSession` and `LiveScanner`) actually correct?**

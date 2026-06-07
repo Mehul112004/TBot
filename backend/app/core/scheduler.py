@@ -110,15 +110,15 @@ def startup_full_refresh(app, scanner):
         if not active_symbols:
             # On cold start there may be no active sessions yet — refresh all supported symbols
             active_symbols = SUPPORTED_SYMBOLS
-        print(f"[Scheduler] Startup full refresh for {active_symbols}...")
+        print(f"[Scheduler] Startup full refresh for {active_symbols}...", flush=True)
         for symbol in active_symbols:
             for timeframe in ALL_TIMEFRAMES:
                 try:
                     SREngine.full_refresh(symbol, timeframe)
                     IndicatorService.invalidate_cache(symbol, timeframe)
                 except Exception as e:
-                    print(f"[Scheduler] Startup refresh error {symbol}/{timeframe}: {e}")
-        print("[Scheduler] Startup full refresh complete.")
+                    print(f"[Scheduler] Startup refresh error {symbol}/{timeframe}: {e}", flush=True)
+        print("[Scheduler] Startup full refresh complete.", flush=True)
 
 
 def init_scheduler(app, scanner):
@@ -134,6 +134,7 @@ def init_scheduler(app, scanner):
     # --- Cold-start: delayed one-shot refresh (FIX-SCH-7) ---
     # Delay by 5 minutes to allow historical candle backfill to complete
     run_time = datetime.now() + timedelta(minutes=5)
+    print(f"[Scheduler] Scheduling startup full refresh to run at {run_time} (5 minutes delay).", flush=True)
     
     scheduler.add_job(
         func=startup_full_refresh,
@@ -186,10 +187,10 @@ def init_scheduler(app, scanner):
     )
 
     scheduler.start()
-    print("[Scheduler] Background scheduler started.")
-    print("[Scheduler] 4h full refresh: every 4h at :01 UTC")
-    print("[Scheduler] 1D full refresh: daily at 00:02 UTC")
-    print("[Scheduler] Minor zone update: every 1h at :03 UTC")
+    print("[Scheduler] Background scheduler started.", flush=True)
+    print("[Scheduler] 4h full refresh: every 4h at :01 UTC", flush=True)
+    print("[Scheduler] 1D full refresh: daily at 00:02 UTC", flush=True)
+    print("[Scheduler] Minor zone update: every 1h at :03 UTC", flush=True)
 
     # Ensure scheduler shuts down cleanly when the app exits
     atexit.register(lambda: scheduler.shutdown(wait=False))

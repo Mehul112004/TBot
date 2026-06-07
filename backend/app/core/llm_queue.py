@@ -12,7 +12,7 @@ import threading
 import queue
 import time
 import logging
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 import uuid
 
 from app.core.base_strategy import SetupSignal
