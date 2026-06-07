@@ -1,5 +1,5 @@
 import os
-import datetime
+from datetime import datetime
 import atexit
 from flask import Flask
 from flask_cors import CORS
@@ -36,7 +36,7 @@ def create_app(test_config=None):
     app.register_blueprint(backtest_bp, url_prefix='/api/backtest')
     app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
 
-    print(f"App started at ===> {datetime.now()}")
+    print(f"App started at ===> {datetime.now()}", flush=True)
 
     with app.app_context():
         # Create tables
