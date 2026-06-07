@@ -29,6 +29,90 @@ logger = logging.getLogger(__name__)
 QueuePayload = Tuple[str, SetupSignal, Any, Dict[str, Any]]
 
 
+def _fetch_htf_df_for_llm(symbol: str, timeframe: str) -> Optional[Any]:
+    """
+    Fetch higher timeframe candles, auto-backfilling/top-up as needed,
+    and return a pandas DataFrame.
+    """
+    import pandas as pd
+    from datetime import datetime, timezone, timedelta
+    from app.core.data_utils import get_finalized_candles, StaleDataError
+    from app.utils.binance import fetch_klines
+    from app.core.config import CANDLE_WARMUP
+    from app.models.db import db
+
+    timeframe_minutes = {
+        '1m': 1, '3m': 3, '5m': 5, '15m': 15, '30m': 30,
+        '1h': 60, '2h': 120, '4h': 240, '6h': 360, '8h': 480,
+        '12h': 720, '1d': 1440, '3d': 4320, '1w': 10080,
+    }
+
+    tf_minutes = timeframe_minutes.get(timeframe, 60)
+    limit = CANDLE_WARMUP
+
+    # 1. Fetch from DB
+    try:
+        df = get_finalized_candles(symbol, timeframe, limit=limit)
+    except StaleDataError:
+        logger.info(f"[LLMQueue] HTF {symbol}/{timeframe} is stale. Will trigger REST fetch.")
+        df = pd.DataFrame()
+    except Exception as e:
+        logger.error(f"[LLMQueue] Error fetching HTF candles: {e}")
+        df = pd.DataFrame()
+
+    # 2. Backfill if insufficient
+    if df.empty or len(df) < limit:
+        logger.info(f"[LLMQueue] Insufficient candles for HTF {symbol}/{timeframe} ({len(df)}/{limit}). Backfilling...")
+        try:
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            lookback_minutes = limit * tf_minutes * 1.2
+            start_ms = now_ms - int(lookback_minutes * 60 * 1000)
+
+            candles = fetch_klines(symbol, timeframe, start_ms, now_ms)
+            if candles:
+                from app.core.scanner import live_scanner
+                for candle_data in candles:
+                    expected_close = candle_data['open_time'] + timedelta(minutes=tf_minutes)
+                    if expected_close > datetime.now(timezone.utc):
+                        continue
+                    live_scanner._upsert_candle(candle_data, commit=False)
+                db.session.commit()
+                df = get_finalized_candles(symbol, timeframe, limit=limit)
+        except Exception as e:
+            logger.error(f"[LLMQueue] Failed to backfill HTF {symbol}/{timeframe}: {e}")
+
+    # 3. Top up if there's a gap
+    if not df.empty:
+        last_candle_time = df['open_time'].iloc[-1]
+        if isinstance(last_candle_time, str):
+            last_candle_time = datetime.fromisoformat(last_candle_time)
+        elif hasattr(last_candle_time, 'to_pydatetime'):
+            last_candle_time = last_candle_time.to_pydatetime()
+
+        expected_next = last_candle_time + timedelta(minutes=tf_minutes)
+        now = datetime.now(timezone.utc)
+        if expected_next + timedelta(minutes=tf_minutes) < now:
+            logger.info(f"[LLMQueue] HTF {symbol}/{timeframe} has gap. Last={last_candle_time.isoformat()}, now={now.isoformat()}. Topping up...")
+            try:
+                from app.core.scanner import live_scanner
+                start_ms = int(expected_next.timestamp() * 1000)
+                now_ms = int(now.timestamp() * 1000)
+                candles = fetch_klines(symbol, timeframe, start_ms, now_ms)
+                if candles:
+                    for candle_data in candles:
+                        expected_close = candle_data['open_time'] + timedelta(minutes=tf_minutes)
+                        if expected_close > now:
+                            continue
+                        live_scanner._upsert_candle(candle_data, commit=False)
+                    db.session.commit()
+                    df = get_finalized_candles(symbol, timeframe, limit=limit)
+            except Exception as e:
+                logger.error(f"[LLMQueue] Failed to top up HTF {symbol}/{timeframe}: {e}")
+
+    return df if not df.empty else None
+
+
+
 class LLMQueueManager:
     """Background worker for LLM signal evaluation with structured context."""
 
@@ -91,6 +175,20 @@ class LLMQueueManager:
                     continue
 
                 watching_setup_id, signal, pre_df, htf_data = item[:4]
+
+                # Ensure htf_data is a dict and fetch '4h' and '1d' if missing
+                import pandas as pd
+                if not isinstance(htf_data, dict):
+                    htf_data = {}
+                else:
+                    htf_data = dict(htf_data)
+
+                for tf in ('4h', '1d'):
+                    if tf not in htf_data or htf_data[tf] is None or (isinstance(htf_data[tf], pd.DataFrame) and htf_data[tf].empty):
+                        logger.info(f"[LLMQueue] Dynamic fetch HTF context: {signal.symbol} / {tf}")
+                        htf_df = _fetch_htf_df_for_llm(signal.symbol, tf)
+                        if htf_df is not None:
+                            htf_data[tf] = htf_df
 
                 # Build the structured context payload
                 if pre_df is not None:

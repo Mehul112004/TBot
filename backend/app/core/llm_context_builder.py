@@ -17,6 +17,117 @@ import pandas as pd
 from typing import Optional, Dict, Any, List
 
 
+def _ensure_all_indicators(df: pd.DataFrame, symbol: str, timeframe: str) -> pd.DataFrame:
+    """Ensure all required indicators, SMC events, and market regime are computed on df."""
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+
+    # ── Core indicators ──
+    from app.core.indicators import (
+        compute_ema, compute_rsi, compute_macd,
+        compute_bollinger, compute_atr, compute_volume_ma, compute_adx
+    )
+
+    # EMAs: 9, 20, 50, 100, 200
+    for p in [9, 20, 50, 100, 200]:
+        col = f'ema_{p}'
+        if col not in df.columns:
+            df[col] = compute_ema(df['close'], period=p)
+
+    # RSI (14)
+    if 'rsi' not in df.columns:
+        df['rsi'] = compute_rsi(df['close'], period=14)
+
+    # ATR (14)
+    if 'atr' not in df.columns:
+        df['atr'] = compute_atr(df['high'], df['low'], df['close'], period=14)
+
+    # ADX (14)
+    if 'adx' not in df.columns:
+        df['adx'] = compute_adx(df['high'], df['low'], df['close'], period=14)
+
+    # MACD
+    if not all(c in df.columns for c in ['macd_line', 'macd_signal', 'macd_histogram']):
+        macd_res = compute_macd(df['close'])
+        df['macd_line'] = macd_res['macd_line']
+        df['macd_signal'] = macd_res['macd_signal']
+        df['macd_histogram'] = macd_res['macd_histogram']
+
+    # Bollinger Bands
+    if not all(c in df.columns for c in ['bb_upper', 'bb_middle', 'bb_lower', 'bb_width']):
+        bb_res = compute_bollinger(df['close'])
+        df['bb_upper'] = bb_res['bb_upper']
+        df['bb_middle'] = bb_res['bb_middle']
+        df['bb_lower'] = bb_res['bb_lower']
+        df['bb_width'] = bb_res['bb_width']
+
+    # Volume MA
+    if 'volume_ma' not in df.columns:
+        df['volume_ma'] = compute_volume_ma(df['volume'], period=20)
+
+    # ── SMC / Market Structure ──
+    from app.core.market_structure import extract_fvgs, extract_order_blocks
+    if not all(c in df.columns for c in ['fvg_active', 'fvg_upper', 'fvg_lower']):
+        try:
+            df = extract_fvgs(df)
+        except Exception:
+            pass
+
+    if not all(c in df.columns for c in ['ob_active', 'ob_upper', 'ob_lower', 'ob_direction']):
+        try:
+            df = extract_order_blocks(df)
+        except Exception:
+            pass
+
+    if 'sr_active' not in df.columns:
+        from app.core.sr_engine import SREngine
+        try:
+            df = SREngine.detect_zones_df(df, symbol=symbol, timeframe=timeframe)
+        except Exception:
+            pass
+
+    # ── Temporal state events ──
+    from app.core.events import detect_choch, detect_volume_climax, detect_liquidity_sweep
+    if 'event_choch_bullish' not in df.columns:
+        try:
+            events_df = detect_choch(df)
+            for col in events_df.columns:
+                if col not in df.columns:
+                    df[col] = events_df[col]
+        except Exception:
+            pass
+
+    if 'event_volume_climax' not in df.columns:
+        try:
+            climax_df = detect_volume_climax(df)
+            for col in climax_df.columns:
+                if col not in df.columns:
+                    df[col] = climax_df[col]
+        except Exception:
+            pass
+
+    if 'event_sweep_bullish' not in df.columns:
+        try:
+            sweep_df = detect_liquidity_sweep(df)
+            for col in sweep_df.columns:
+                if col not in df.columns:
+                    df[col] = sweep_df[col]
+        except Exception:
+            pass
+
+    # ── Market regime ──
+    from app.core.market_regime import detect_market_regime
+    if 'regime' not in df.columns:
+        try:
+            df = detect_market_regime(df)
+        except Exception:
+            pass
+
+    return df
+
+
 def build_llm_context(
     df: pd.DataFrame,
     signal: dict,  # SetupSignal.to_dict() or equivalent
@@ -39,6 +150,17 @@ def build_llm_context(
         Dict with 8 top-level keys: signal_metadata, risk_metrics, market_structure,
         indicators, volume, htf_context, recent_price_action, classified_candles
     """
+    df = _ensure_all_indicators(df, symbol, signal.get('timeframe', '1h'))
+
+    if htf_data:
+        processed_htf = {}
+        for tf, htf_df in htf_data.items():
+            if htf_df is not None and not htf_df.empty:
+                processed_htf[tf] = _ensure_all_indicators(htf_df, symbol, tf)
+            else:
+                processed_htf[tf] = htf_df
+        htf_data = processed_htf
+
     last = df.iloc[-1]
     direction = signal.get('direction', 'LONG')
 

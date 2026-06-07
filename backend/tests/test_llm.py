@@ -112,8 +112,75 @@ def test_low_confidence_auto_downgrade():
     assert LLM_CONFIDENCE_THRESHOLD == 72
     print("Low confidence threshold validation working correctly.")
 
+def test_llm_context_builder_completeness():
+    import pandas as pd
+    import numpy as np
+    from app.core.llm_context_builder import build_llm_context
+
+    n = 210  # need enough rows for EMA 200 warmup
+    dates = pd.date_range("2026-06-01 00:00:00", periods=n, freq="1h")
+    df = pd.DataFrame({
+        'open_time': dates,
+        'open': np.linspace(100, 110, n),
+        'high': np.linspace(101, 111, n),
+        'low': np.linspace(99, 109, n),
+        'close': np.linspace(100.5, 110.5, n),
+        'volume': np.linspace(1000, 1100, n),
+    })
+
+    signal = {
+        'strategy_name': 'Trend Following',
+        'timeframe': '1h',
+        'direction': 'SHORT',
+        'entry': 110.5,
+        'sl': 112.0,
+        'tp1': 105.0,
+        'tp2': 100.0,
+        'confidence': 0.75,
+        'regime': 'TRENDING_DOWN'
+    }
+
+    htf_df_4h = pd.DataFrame({
+        'open_time': pd.date_range("2026-06-01 00:00:00", periods=n, freq="4h"),
+        'open': np.linspace(100, 110, n),
+        'high': np.linspace(101, 111, n),
+        'low': np.linspace(99, 109, n),
+        'close': np.linspace(100.5, 110.5, n),
+        'volume': np.linspace(1000, 1100, n),
+    })
+
+    htf_df_1d = pd.DataFrame({
+        'open_time': pd.date_range("2026-06-01 00:00:00", periods=n, freq="1d"),
+        'open': np.linspace(100, 110, n),
+        'high': np.linspace(101, 111, n),
+        'low': np.linspace(99, 109, n),
+        'close': np.linspace(100.5, 110.5, n),
+        'volume': np.linspace(1000, 1100, n),
+    })
+
+    htf_data = {
+        '4h': htf_df_4h,
+        '1d': htf_df_1d
+    }
+
+    context = build_llm_context(df, signal, "ETHUSDT", htf_data=htf_data)
+
+    # Assert main indicators are populated
+    assert context["indicators"]["rsi"] is not None
+    assert context["indicators"]["bb_state"] != "N/A"
+    assert context["indicators"]["ema_values"].get("ema_20") is not None
+    assert context["indicators"]["ema_values"].get("ema_200") is not None
+    assert context["indicators"]["adx"] is not None
+
+    # Assert HTF structure descriptions are populated and not N/A
+    assert context["htf_context"]["htf_4h_structure"] != "N/A"
+    assert context["htf_context"]["htf_1d_structure"] != "N/A"
+
+    print("test_llm_context_builder_completeness passed successfully.")
+
 if __name__ == "__main__":
     test_prompt_builder()
     test_schema_field_order()
     test_schema_valid()
     test_low_confidence_auto_downgrade()
+    test_llm_context_builder_completeness()
