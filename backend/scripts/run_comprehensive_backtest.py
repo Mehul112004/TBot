@@ -229,6 +229,10 @@ def run_backtests():
         '--no-sync', action='store_true',
         help='Skip data sync (fetching candles from Binance)'
     )
+    parser.add_argument(
+        '--slippage', type=float, default=10.0,
+        help='Per-side slippage in basis points (default: 10 = 0.1%%)'
+    )
     args = parser.parse_args()
 
     app = create_app()
@@ -284,6 +288,7 @@ def run_backtests():
         print(f"  Lookback  : {args.days} days")
         print(f"  Capital   : ${args.capital:,.2f}")
         print(f"  Risk/trade: {args.risk*100:.0f}%")
+        print(f"  Slippage  : {args.slippage:.1f} bps/side")
         print(f"  Data sync : {'SKIP' if args.no_sync else 'ON'}")
         print(f"{'='*60}\n")
 
@@ -301,6 +306,7 @@ def run_backtests():
                 "lookback_days": args.days,
                 "initial_capital": args.capital,
                 "risk_per_trade": args.risk,
+                "slippage_bps": args.slippage,
             },
             "runs": []
         }
@@ -331,6 +337,7 @@ def run_backtests():
                             strategy_names=[strat.name],
                             initial_capital=args.capital,
                             risk_pct=args.risk,
+                            slippage_bps=args.slippage,
                         )
 
                         run_entry = {

@@ -18,6 +18,7 @@ migrations = [
     ("telegram_status", "ALTER TABLE confirmed_signals ADD COLUMN telegram_status VARCHAR(20) DEFAULT 'PENDING';"),
     ("telegram_retries", "ALTER TABLE confirmed_signals ADD COLUMN telegram_retries INTEGER DEFAULT 0;"),
     ("telegram_message_id", "ALTER TABLE confirmed_signals ADD COLUMN telegram_message_id VARCHAR(50);"),
+    ("backtest_trades_equity_at_entry", "ALTER TABLE backtest_trades ADD COLUMN equity_at_entry FLOAT;"),
 ]
 
 for col_name, sql in migrations:

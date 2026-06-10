@@ -108,7 +108,6 @@ class StrategyRunner:
         symbol: str,
         timeframe: str,
         candle_df: pd.DataFrame,
-        sr_zones: list = None,
         min_confidence_override: Optional[float] = None,
     ) -> List[SetupSignal]:
         """
@@ -128,10 +127,6 @@ class StrategyRunner:
             try:
                 df = candle_df.copy()
                 df = strategy.pre_process(df, symbol=symbol, timeframe=timeframe)
-
-                # Inject backtest-computed S/R zones if strategy uses them
-                if sr_zones and 'sr' in strategy.required_features:
-                    _inject_sr_zones(df, sr_zones)
 
                 df = strategy.generate_signals(df)
 
@@ -187,33 +182,3 @@ class StrategyRunner:
                 continue
 
         return signals
-
-
-def _inject_sr_zones(df: pd.DataFrame, sr_zones: list, midpoint: int = None):
-    """
-    Inject pre-computed S/R zones as DataFrame columns (time-aware).
-
-    Zones are only injected from the midpoint of the dataset onward
-    to prevent lookahead bias (simulating "zones formed by this point").
-    """
-    if midpoint is None:
-        midpoint = max(100, len(df) // 3)
-
-    supports = [z for z in sr_zones if z.get('zone_type') in ('support', 'both')]
-    resistances = [z for z in sr_zones if z.get('zone_type') in ('resistance', 'both')]
-
-    best_support = max(supports, key=lambda z: z.get('strength_score', 0), default=None)
-    best_resistance = max(resistances, key=lambda z: z.get('strength_score', 0), default=None)
-
-    if best_support or best_resistance:
-        df.loc[df.index[midpoint:], 'sr_active'] = True
-
-    if best_support:
-        df.loc[df.index[midpoint:], 'sr_support_upper'] = best_support.get('zone_upper', 0)
-        df.loc[df.index[midpoint:], 'sr_support_lower'] = best_support.get('zone_lower', 0)
-        df.loc[df.index[midpoint:], 'sr_support_strength'] = best_support.get('strength_score', 0)
-
-    if best_resistance:
-        df.loc[df.index[midpoint:], 'sr_resistance_upper'] = best_resistance.get('zone_upper', 0)
-        df.loc[df.index[midpoint:], 'sr_resistance_lower'] = best_resistance.get('zone_lower', 0)
-        df.loc[df.index[midpoint:], 'sr_resistance_strength'] = best_resistance.get('strength_score', 0)

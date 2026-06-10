@@ -96,6 +96,14 @@ def run_backtest():
 
     risk_pct = risk_per_trade / 100.0  # Convert percentage to fraction
 
+    # Slippage
+    try:
+        slippage_bps = float(data.get('slippage_bps', 10.0))
+        if not (0.0 <= slippage_bps <= 100.0):
+            raise ValueError()
+    except (ValueError, TypeError):
+        return jsonify({'error': 'slippage_bps must be between 0 and 100'}), 400
+
     # ---------- Run backtest ----------
     result = BacktestEngine.run(
         symbol=symbol,
@@ -106,6 +114,7 @@ def run_backtest():
         strategy_names=strategy_names,
         initial_capital=initial_capital,
         risk_pct=risk_pct,
+        slippage_bps=slippage_bps,
     )
 
     if result['status'] == 'FAILED':

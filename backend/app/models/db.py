@@ -385,6 +385,7 @@ class BacktestTrade(db.Model):
     pnl_pct = db.Column(db.Float)
     rr_ratio = db.Column(db.Float)
     duration_mins = db.Column(db.Float)
+    equity_at_entry = db.Column(db.Float)                       # Capital at time of entry (compounding baseline)
     notes = db.Column(db.Text, default='')
 
     def to_dict(self):
@@ -407,6 +408,7 @@ class BacktestTrade(db.Model):
             'pnl_pct': self.pnl_pct,
             'rr_ratio': self.rr_ratio,
             'duration_mins': self.duration_mins,
+            'equity_at_entry': self.equity_at_entry,
             'notes': self.notes,
         }
 

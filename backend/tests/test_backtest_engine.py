@@ -32,11 +32,12 @@ def sample_candle_df():
 
 
 def test_simulate_trades_long_hit_tp():
-    # Trade entry at candle 0, TP hit at candle 2
+    # Trade entry at candle 0; TP2 wins over TP1 on same bar (momentum carry-through).
+    # With 10 bps slippage, pnl = gross_pnl - slippage_cost.
     candle_df = pd.DataFrame({
         'open_time': [datetime(2025, 1, 1, 0, 0) + timedelta(hours=i) for i in range(4)],
         'open': [100, 100, 100, 100],
-        'high': [100, 105, 120, 110], # High hits TP (115) at index 2
+        'high': [100, 105, 120, 110],  # Bar 2 high=120 hits both TP1(110) and TP2(115)
         'low': [100, 95, 95, 95],
         'close': [100, 100, 100, 100],
     })
@@ -54,18 +55,25 @@ def test_simulate_trades_long_hit_tp():
     assert len(trades) == 1
     trade = trades[0]
     
-    assert trade['outcome'] == 'HIT_TP1'
-    assert trade['exit_price'] == 110.0
-    assert trade['rr_ratio'] == 1.0  # (110-100) / (100-90)
-    assert trade['pnl'] == 10.0     # risk = $10, size = 1, pnl = 1 * 10
+    # TP2 wins — both hit on same bar, TP2 has higher priority (strong momentum)
+    assert trade['outcome'] == 'HIT_TP2'
+    assert trade['exit_price'] == 115.0
+    # gross_rr = (115-100) / (100-90) = 1.5
+    assert trade['rr_ratio'] == pytest.approx(1.5, abs=1e-6)
+    # position_size = (1000*0.01) / 10 = 1.0
+    # gross_pnl = 1.0 * (115-100) = 15.0
+    # slippage = 1.0 * 0.001 * (100 + 115) = 0.215
+    # net pnl = 15.0 - 0.215 = 14.785
+    assert trade['pnl'] == pytest.approx(14.79, abs=0.01)
 
 
 def test_simulate_trades_short_hit_sl():
-    # Trade entry at candle 0, SL hit at candle 1
+    # Trade entry at candle 0, SL hit at candle 2 (entry bar is 1, forward from bar 2).
+    # With 10 bps slippage, pnl = gross_pnl - slippage_cost.
     candle_df = pd.DataFrame({
         'open_time': [datetime(2025, 1, 1, 0, 0) + timedelta(hours=i) for i in range(3)],
         'open': [100, 100, 100],
-        'high': [100, 115, 100], # High hits SL (110) at index 1
+        'high': [100, 100, 115],  # Bar 2 high=115 hits SHORT SL (110)
         'low': [100, 95, 95],
         'close': [100, 100, 100],
     })
@@ -84,17 +92,21 @@ def test_simulate_trades_short_hit_sl():
     
     assert trade['outcome'] == 'HIT_SL'
     assert trade['exit_price'] == 110.0
-    assert trade['pnl'] == -10.0   # risk = $10, size = 1, loss = 1 * -10
+    # position_size = 10/10 = 1.0, gross_pnl = 1.0*(100-110) = -10
+    # slippage = 1.0 * 0.001 * (100+110) = 0.21
+    # net pnl = -10 - 0.21 = -10.21
+    assert trade['pnl'] == pytest.approx(-10.21, abs=0.01)
 
 
 def test_simulate_trades_same_bar_conflict():
-    # Both SL and TP breached on the exact same bar
+    # Both SL and TP breached on the exact same forward bar.
+    # SL always wins (conservative rule).
     candle_df = pd.DataFrame({
-        'open_time': [datetime(2025, 1, 1), datetime(2025, 1, 2)],
-        'open': [100, 100],
-        'high': [100, 120], # Hits TP (115)
-        'low': [100, 80],   # Hits SL (90)
-        'close': [100, 100],
+        'open_time': [datetime(2025, 1, 1), datetime(2025, 1, 2), datetime(2025, 1, 3)],
+        'open': [100, 100, 100],
+        'high': [100, 100, 120],  # Bar 2 hits TP (115)
+        'low': [100, 100, 80],    # Bar 2 hits SL (90)
+        'close': [100, 100, 100],
     })
     
     signals = [
@@ -109,7 +121,7 @@ def test_simulate_trades_same_bar_conflict():
     trades = BacktestEngine.simulate_trades(signals, candle_df, initial_capital=1000, risk_pct=0.01)
     trade = trades[0]
     
-    # According to our conservative rule, SL wins
+    # SL wins on same-bar conflict
     assert trade['outcome'] == 'HIT_SL'
 
 

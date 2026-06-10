@@ -112,7 +112,12 @@ class SREngine:
         return zones
 
     @staticmethod
-    def detect_round_numbers(symbol: str, current_price: float, range_pct: float = 0.15) -> list[dict]:
+    def detect_round_numbers(
+        symbol: str,
+        current_price: float,
+        range_pct: float = 0.15,
+        price_range: tuple[float, float] | None = None,
+    ) -> list[dict]:
         """
         Generate zones at psychologically significant round numbers near current price.
 
@@ -120,6 +125,9 @@ class SREngine:
             symbol: Trading pair (e.g., 'BTCUSDT')
             current_price: Latest price to anchor the round number search
             range_pct: How far above/below current price to generate levels (default ±15%)
+            price_range: Optional (min_price, max_price) to override range_pct.
+                         Used by backtests to cover the full historical price range
+                         without anchoring to the last bar's price.
 
         Returns:
             List of zone dicts for round number levels
@@ -127,8 +135,12 @@ class SREngine:
         config = ROUND_NUMBER_CONFIG.get(symbol, DEFAULT_ROUND_CONFIG)
         zones = []
 
-        price_lower = current_price * (1 - range_pct)
-        price_upper = current_price * (1 + range_pct)
+        if price_range is not None:
+            price_lower = price_range[0] * 0.95   # small buffer below min
+            price_upper = price_range[1] * 1.05   # small buffer above max
+        else:
+            price_lower = current_price * (1 - range_pct)
+            price_upper = current_price * (1 + range_pct)
 
         for increment_key in ['small', 'large']:
             increment = config[increment_key]
@@ -144,8 +156,12 @@ class SREngine:
                     break
                 # Only include levels within the actual range bounds
                 if level > 0 and level >= price_lower:
-                    # Determine if support or resistance relative to current price
-                    if level < current_price:
+                    # When using full range, zone_type is 'both' since
+                    # support/resistance is relative to where price is at
+                    # any given time, not a single anchor price.
+                    if price_range is not None:
+                        zone_type = 'both'
+                    elif level < current_price:
                         zone_type = 'support'
                     elif level > current_price:
                         zone_type = 'resistance'
@@ -328,7 +344,7 @@ class SREngine:
 
     @staticmethod
     def score_zone(zone: dict, df: pd.DataFrame, timeframe: str,
-                   formation_idx: int = None) -> dict:
+                   formation_idx: int = None, max_bar: int = None) -> dict:
         """
         Assign a strength score to a zone based on historical touches and timeframe weight.
 
@@ -341,6 +357,9 @@ class SREngine:
             df: DataFrame of candles for touch counting
             timeframe: Origin timeframe of this zone
             formation_idx: Index of the candle that formed this zone (excluded from touch count)
+            max_bar: If set, only count touches in df[0:max_bar] to prevent
+                     lookahead bias in backtests. Touches after this bar are
+                     invisible at the time the zone was formed.
 
         Returns:
             Updated zone dict with strength_score and touch_count
@@ -348,10 +367,11 @@ class SREngine:
         upper = zone.get('zone_upper', zone['price_level'])
         lower = zone.get('zone_lower', zone['price_level'])
 
-        touch_mask = (df['high'] >= lower) & (df['low'] <= upper)
+        scoring_df = df.iloc[:max_bar] if max_bar is not None else df
+        touch_mask = (scoring_df['high'] >= lower) & (scoring_df['low'] <= upper)
 
         # Exclude the candle that formed this zone (FIX-SR-4)
-        if formation_idx is not None and formation_idx < len(df):
+        if formation_idx is not None and formation_idx < len(scoring_df):
             touch_mask.iloc[formation_idx] = False
 
         touch_count = int(touch_mask.sum())
@@ -362,7 +382,7 @@ class SREngine:
         # Find the most recent touch
         last_tested = None
         if touch_mask.any():
-            last_tested = df.loc[touch_mask, 'open_time'].iloc[-1]
+            last_tested = scoring_df.loc[touch_mask, 'open_time'].iloc[-1]
             if isinstance(last_tested, pd.Timestamp):
                 last_tested = last_tested.to_pydatetime()
             if hasattr(last_tested, 'tzinfo') and last_tested.tzinfo is not None:
@@ -524,7 +544,13 @@ class SREngine:
         swing_zones = cls.detect_swing_points(df, lookback=swing_lookback)
         all_zones.extend(swing_zones)
 
-        round_zones = cls.detect_round_numbers(symbol, current_price)
+        # Use full price range for round numbers to avoid anchoring
+        # to a single price point (prevents lookahead in backtests)
+        price_min = float(df['close'].min())
+        price_max = float(df['close'].max())
+        round_zones = cls.detect_round_numbers(
+            symbol, current_price, price_range=(price_min, price_max),
+        )
         all_zones.extend(round_zones)
 
         period_zones = cls.detect_prev_period_hl(symbol)
@@ -553,8 +579,12 @@ class SREngine:
             upper, lower = cls.calculate_zone_width(zone['price_level'], current_atr)
             zone['zone_upper'] = upper
             zone['zone_lower'] = lower
+            form_idx = zone.pop('_formation_idx', None)
+            # Score using only data up to the formation bar to prevent
+            # lookahead bias (future touches must not inflate strength)
             cls.score_zone(zone, df, timeframe,
-                           formation_idx=zone.pop('_formation_idx', None))
+                           formation_idx=form_idx,
+                           max_bar=form_idx)
             # Restore the formation index for temporal masking
             saved_idx = zone_form_idx.get(i)
             if saved_idx is not None:

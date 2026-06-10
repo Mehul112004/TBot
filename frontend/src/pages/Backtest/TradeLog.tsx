@@ -77,7 +77,7 @@ export default function TradeLog({ trades, runId }: Props) {
     const headers = [
       '#', 'Date', 'Symbol', 'TF', 'Direction', 'Strategy',
       'Entry', 'SL', 'TP1', 'TP2', 'Exit', 'Outcome',
-      'PnL ($)', 'PnL (%)', 'R/R', 'Duration',
+      'PnL ($)', 'PnL (%)', 'R/R', 'Duration', 'Capital',
     ];
     const rows = sortedTrades.map(t => [
       t.trade_number,
@@ -96,6 +96,7 @@ export default function TradeLog({ trades, runId }: Props) {
       t.pnl_pct ?? '',
       t.rr_ratio ?? '',
       t.duration_mins ?? '',
+      t.equity_at_entry ?? '',
     ]);
 
     const csvContent = [
@@ -126,6 +127,7 @@ export default function TradeLog({ trades, runId }: Props) {
     { key: 'pnl', label: 'PnL' },
     { key: 'rr_ratio', label: 'R/R', className: 'w-14' },
     { key: 'duration_mins', label: 'Dur', className: 'w-16' },
+    { key: 'equity_at_entry', label: 'Capital', className: 'w-24' },
   ];
 
   return (
@@ -239,6 +241,11 @@ export default function TradeLog({ trades, runId }: Props) {
                   </td>
                   <td className="px-3 py-2 text-slate-400 text-xs">
                     {formatDuration(trade.duration_mins)}
+                  </td>
+                  <td className="px-3 py-2 text-slate-300 font-mono text-xs">
+                    {trade.equity_at_entry !== null && trade.equity_at_entry !== undefined
+                      ? `$${trade.equity_at_entry.toFixed(0)}`
+                      : '—'}
                   </td>
                 </tr>
               );

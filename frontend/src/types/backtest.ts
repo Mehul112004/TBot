@@ -45,6 +45,7 @@ export interface BacktestTrade {
   pnl_pct: number | null;
   rr_ratio: number | null;
   duration_mins: number | null;
+  equity_at_entry: number | null;
   notes: string;
 }
 

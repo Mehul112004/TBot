@@ -179,6 +179,7 @@ export default function RunDetailModal({ run, onClose }: Props) {
                       <th className="px-2 py-2 text-left text-slate-400 font-medium">Outcome</th>
                       <th className="px-2 py-2 text-right text-slate-400 font-medium">PnL</th>
                       <th className="px-2 py-2 text-right text-slate-400 font-medium">R:R</th>
+                      <th className="px-2 py-2 text-right text-slate-400 font-medium">Capital</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -202,6 +203,9 @@ export default function RunDetailModal({ run, onClose }: Props) {
                           </td>
                           <td className="px-2 py-1.5 text-right text-slate-300">
                             {t.rr_ratio?.toFixed(2) ?? '—'}
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-slate-300 font-mono">
+                            {t.equity_at_entry != null ? `$${t.equity_at_entry.toFixed(0)}` : '—'}
                           </td>
                         </tr>
                       );

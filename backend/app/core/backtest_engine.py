@@ -17,11 +17,8 @@ import uuid
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from typing import Optional
 
 from app.core.base_strategy import BaseStrategy, SetupSignal
-from app.core.indicators import compute_atr
-from app.core.sr_engine import SREngine
 from app.core.strategy_runner import StrategyRunner
 from app.models.db import db, Candle, BacktestRun, BacktestTrade
 
@@ -45,6 +42,7 @@ class BacktestEngine:
         initial_capital: float,
         risk_pct: float,
         trail_stop: bool = False,  # Disabled — trailing stops hurt trend-following strategies
+        slippage_bps: float = 10.0,  # Per-side slippage in basis points (10 = 0.1%)
     ) -> list[dict]:
         """
         Resolve trade outcomes using vectorized pandas operations.
@@ -60,6 +58,8 @@ class BacktestEngine:
             candle_df: Full OHLCV DataFrame sorted by open_time.
             initial_capital: Starting capital for position sizing.
             risk_pct: Fraction of capital risked per trade (e.g. 0.01 = 1%).
+            slippage_bps: Per-side slippage/fees in basis points (default 10).
+                          Applied to both entry and exit prices.
 
         Returns:
             List of trade dicts with all fields needed for BacktestTrade.
@@ -68,6 +68,8 @@ class BacktestEngine:
             return []
 
         trades = []
+        equity = initial_capital  # Track running equity for compounding position sizing
+        slip_frac = slippage_bps / 10000.0  # Convert bps to fraction
         highs = candle_df['high'].values
         lows = candle_df['low'].values
         closes = candle_df['close'].values
@@ -208,13 +210,13 @@ class BacktestEngine:
                             exit_price = trailing_sl
                             exit_bar_offset = bar_idx
                             break
-                        # Check TP2
+                        # Check TP2 before TP1: if price blows through both on the
+                        # same bar, TP2 wins (strong momentum carried past TP1).
                         if bar_high >= tp2:
                             outcome = 'HIT_TP2'
                             exit_price = tp2
                             exit_bar_offset = bar_idx
                             break
-                        # Check TP1
                         if bar_high >= tp1:
                             outcome = 'HIT_TP1'
                             exit_price = tp1
@@ -236,6 +238,8 @@ class BacktestEngine:
                             exit_price = trailing_sl
                             exit_bar_offset = bar_idx
                             break
+                        # Check TP2 before TP1: if price blows through both on the
+                        # same bar, TP2 wins (strong momentum carried past TP1).
                         if bar_low <= tp2:
                             outcome = 'HIT_TP2'
                             exit_price = tp2
@@ -271,33 +275,42 @@ class BacktestEngine:
                     exit_time = pd.Timestamp(fwd_times[exit_idx]).to_pydatetime()
                     outcome = 'EXPIRED'
                 else:
-                    priority = {'HIT_SL': 0, 'HIT_TP1': 1, 'HIT_TP2': 2}
+                    priority = {'HIT_SL': 0, 'HIT_TP2': 1, 'HIT_TP1': 2}
                     candidates.sort(key=lambda x: (x[1], priority.get(x[0], 99)))
                     outcome, exit_bar_offset, exit_price = candidates[0]
                     exit_price = float(exit_price)
                     exit_time = pd.Timestamp(fwd_times[exit_bar_offset]).to_pydatetime()
 
-            # Calculate PnL
-            risk_amount = initial_capital * risk_pct
+            # ── Position sizing (unadjusted risk distance) ──
+            # Slippage is a transaction cost applied ON TOP of the base pnl,
+            # not part of the risk structure. Mixing slippage into risk_distance
+            # causes position sizes to drift and SL losses to exceed intended risk.
+            equity_at_entry = equity  # snapshot before this trade's PnL
+            risk_amount = equity * risk_pct
             risk_distance = abs(entry_price - sl)
             if risk_distance == 0:
                 position_size = 0
             else:
                 position_size = risk_amount / risk_distance
 
+            # Gross PnL (unadjusted prices)
             if signal.direction == 'LONG':
-                pnl = position_size * (exit_price - entry_price)
+                gross_pnl = position_size * (exit_price - entry_price)
             else:
-                pnl = position_size * (entry_price - exit_price)
+                gross_pnl = position_size * (entry_price - exit_price)
 
-            pnl_pct = (pnl / initial_capital) * 100 if initial_capital > 0 else 0
+            # Transaction costs: per-side slippage on entry + exit notional
+            slippage_cost = position_size * slip_frac * (entry_price + exit_price)
 
-            # R/R achieved
+            pnl = gross_pnl - slippage_cost
+            pnl_pct = (pnl / equity) * 100 if equity > 0 else 0
+
+            # Update running equity for next trade's position sizing
+            equity += pnl
+
+            # R/R achieved (gross, based on unadjusted prices before costs)
             if risk_distance > 0:
-                if signal.direction == 'LONG':
-                    rr_ratio = (exit_price - entry_price) / risk_distance
-                else:
-                    rr_ratio = (entry_price - exit_price) / risk_distance
+                rr_ratio = gross_pnl / risk_amount
             else:
                 rr_ratio = 0
 
@@ -324,6 +337,7 @@ class BacktestEngine:
                 'pnl_pct': round(float(pnl_pct), 4),
                 'rr_ratio': round(float(rr_ratio), 4),
                 'duration_mins': round(float(duration_mins), 2),
+                'equity_at_entry': round(float(equity_at_entry), 2),
                 'notes': signal.notes,
             })
 
@@ -388,6 +402,7 @@ class BacktestEngine:
     ) -> dict:
         """
         Compute all summary performance metrics from trade results.
+        Sharpe/Sortino are annualized using actual trade frequency.
 
         Returns dict with: total_trades, win_rate, total_pnl, total_pnl_pct,
         sharpe_ratio, sortino_ratio, max_drawdown, max_drawdown_pct,
@@ -399,7 +414,8 @@ class BacktestEngine:
                 'total_trades': 0, 'win_rate': 0, 'total_pnl': 0,
                 'total_pnl_pct': 0, 'sharpe_ratio': 0, 'sortino_ratio': 0,
                 'max_drawdown': 0, 'max_drawdown_pct': 0, 'avg_rr': 0,
-                'profit_factor': 0, 'avg_trade_duration_mins': 0,
+                'avg_winner_rr': 0, 'profit_factor': 0,
+                'avg_trade_duration_mins': 0,
                 'best_trade_pnl': 0, 'worst_trade_pnl': 0,
             }
 
@@ -413,10 +429,23 @@ class BacktestEngine:
         total_pnl = float(np.sum(pnl_array))
         total_pnl_pct = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0
 
-        # Sharpe Ratio (annualized)
+        # ── Annualization factor from actual trade frequency ──
+        # Using √252 on per-trade returns is only valid for daily returns.
+        # Instead, compute trades-per-year from the actual backtest duration.
+        ann_factor = 1.0
+        if len(trades) >= 2:
+            first_entry = trades[0].get('entry_time')
+            last_exit = trades[-1].get('exit_time')
+            if first_entry and last_exit:
+                total_days = (last_exit - first_entry).total_seconds() / 86400.0
+                if total_days > 0:
+                    trades_per_year = len(trades) / (total_days / 365.25)
+                    ann_factor = np.sqrt(trades_per_year)
+
+        # Sharpe Ratio (annualized by actual trade frequency)
         if len(pnl_array) > 1 and np.std(pnl_array) > 0:
             returns = pnl_array / initial_capital
-            sharpe = float(np.mean(returns) / np.std(returns) * np.sqrt(252))
+            sharpe = float(np.mean(returns) / np.std(returns) * ann_factor)
         else:
             sharpe = 0.0
 
@@ -425,9 +454,9 @@ class BacktestEngine:
             returns = pnl_array / initial_capital
             negative_returns = returns[returns < 0]
             if len(negative_returns) > 0 and np.std(negative_returns) > 0:
-                sortino = float(np.mean(returns) / np.std(negative_returns) * np.sqrt(252))
+                sortino = float(np.mean(returns) / np.std(negative_returns) * ann_factor)
             else:
-                sortino = float(np.mean(returns) * np.sqrt(252)) if np.mean(returns) > 0 else 0.0
+                sortino = float(np.mean(returns) * ann_factor) if np.mean(returns) > 0 else 0.0
         else:
             sortino = 0.0
 
@@ -453,8 +482,9 @@ class BacktestEngine:
             profit_factor = 999.99
 
         # Average R/R for winners
-        rr_values = [t.get('rr_ratio', 0) or 0 for t in trades if t['outcome'] in ('HIT_TP1', 'HIT_TP2')]
-        avg_rr = float(np.mean(rr_values)) if rr_values else 0
+        winner_rr = [t.get('rr_ratio', 0) or 0 for t in trades if t['outcome'] in ('HIT_TP1', 'HIT_TP2')]
+        avg_rr = float(np.mean(winner_rr)) if winner_rr else 0
+        avg_winner_rr = avg_rr  # alias for clarity
 
         # Average trade duration
         durations = [t.get('duration_mins', 0) or 0 for t in trades]
@@ -474,6 +504,7 @@ class BacktestEngine:
             'max_drawdown': round(float(max_dd), 2),
             'max_drawdown_pct': round(float(max_dd_pct), 2),
             'avg_rr': round(float(avg_rr), 4),
+            'avg_winner_rr': round(float(avg_winner_rr), 4),
             'profit_factor': round(float(profit_factor), 4),
             'avg_trade_duration_mins': round(float(avg_duration), 2),
             'best_trade_pnl': round(float(best_pnl), 2),
@@ -493,17 +524,19 @@ class BacktestEngine:
         strategy_names: list[str],
         initial_capital: float = 10000.0,
         risk_pct: float = 0.01,
+        slippage_bps: float = 10.0,
     ) -> dict:
         """
         Execute a full backtest.
 
         Steps:
           1. Load candles from DB
-          2. Detect S/R zones from the dataset
-          3. Run all strategies via StrategyRunner.scan_historical()
-          4. Simulate trades with next-bar-open entry + cooldown
-          5. Build equity curve and compute metrics
-          6. Persist to DB
+          2. Run all strategies via StrategyRunner.scan_historical()
+             (S/R zones are computed per-strategy inside pre_process
+              with proper temporal masking — no global precomputation)
+          3. Simulate trades with next-bar-open entry + cooldown
+          4. Build equity curve and compute metrics
+          5. Persist to DB
         """
         run_id = str(uuid.uuid4())
 
@@ -544,73 +577,43 @@ class BacktestEngine:
             candle_df['open_time'] = pd.to_datetime(candle_df['open_time'])
             candle_df = candle_df.sort_values('open_time').reset_index(drop=True)
 
-            # 2. Detect S/R zones from the dataset (for strategies that need them)
-            atr_series = compute_atr(
-                candle_df['high'], candle_df['low'], candle_df['close'], 14
-            )
-            current_atr = float(atr_series.iloc[-1]) if pd.notna(atr_series.iloc[-1]) else 0
-            current_price = float(candle_df['close'].iloc[-1])
-
-            if current_atr <= 0:
-                current_atr = current_price * 0.01
-
-            all_zones_raw = []
-            swing_zones = SREngine.detect_swing_points(candle_df, lookback=5)
-            all_zones_raw.extend(swing_zones)
-            round_zones = SREngine.detect_round_numbers(symbol, current_price)
-            all_zones_raw.extend(round_zones)
-
-            for zone in all_zones_raw:
-                upper, lower = SREngine.calculate_zone_width(zone['price_level'], current_atr)
-                zone['zone_upper'] = upper
-                zone['zone_lower'] = lower
-
-            merged_zones = SREngine.merge_zones(all_zones_raw, current_atr)
-            for zone in merged_zones:
-                upper, lower = SREngine.calculate_zone_width(zone['price_level'], current_atr)
-                zone['zone_upper'] = upper
-                zone['zone_lower'] = lower
-                SREngine.score_zone(zone, candle_df, timeframe)
-                zone['symbol'] = symbol
-                zone['timeframe'] = timeframe
-
-            sr_zones = merged_zones
-
-            # 3. Run strategies (all use v3 unified path)
+            # 2. Run strategies
+            # S/R zones are now computed per-strategy inside pre_process()
+            # with proper temporal masking via _formation_idx (no lookahead).
             signals = StrategyRunner.scan_historical(
                 strategies=strategies,
                 symbol=symbol,
                 timeframe=timeframe,
                 candle_df=candle_df,
-                sr_zones=sr_zones,
             )
 
             # Sort signals chronologically
             signals.sort(key=lambda s: s.timestamp if s.timestamp else datetime.min)
 
-            # 4. Simulate trades
+            # 3. Simulate trades
             trade_results = cls.simulate_trades(
                 signals=signals,
                 candle_df=candle_df,
                 initial_capital=initial_capital,
                 risk_pct=risk_pct,
+                slippage_bps=slippage_bps,
             )
 
-            # 5. Build equity curve
+            # 4. Build equity curve
             equity_curve = cls.build_equity_curve(
                 trades=trade_results,
                 initial_capital=initial_capital,
                 candle_df=candle_df,
             )
 
-            # 6. Compute metrics
+            # 5. Compute metrics
             metrics = cls.compute_metrics(
                 trades=trade_results,
                 initial_capital=initial_capital,
                 equity_curve=equity_curve,
             )
 
-            # 7. Persist results
+            # 6. Persist results
             run_record.status = 'COMPLETED'
             run_record.completed_at = datetime.utcnow()
             run_record.total_trades = metrics['total_trades']
@@ -649,6 +652,7 @@ class BacktestEngine:
                     pnl_pct=t['pnl_pct'],
                     rr_ratio=t['rr_ratio'],
                     duration_mins=t['duration_mins'],
+                    equity_at_entry=t.get('equity_at_entry', 0),
                     notes=t.get('notes', ''),
                 )
                 db.session.add(trade_record)
