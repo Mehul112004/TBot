@@ -14,6 +14,7 @@ This strategy produces ~0.5-1.0 signals/day with high confidence.
 
 import numpy as np
 import pandas as pd
+from scipy.signal import argrelextrema
 
 from app.core.base_strategy import BaseStrategy, SetupSignal
 
@@ -27,7 +28,7 @@ class Burner920Strategy(BaseStrategy):
     )
     timeframes = ["1h"]  # Active — 34% win / +10.3% on BTC 1h
     version = "4.0"
-    min_confidence = 0.65  # Must pass 3 hard + 4 soft = 7/9
+    min_confidence = 0.65  # Must pass 3 hard + 4 soft = 7/10
 
     allowed_regimes = ["TRENDING_UP", "TRENDING_DOWN"]
     require_htf_alignment = True
@@ -36,7 +37,7 @@ class Burner920Strategy(BaseStrategy):
     tp2_rr = 4.0
 
     required_features = ['ema', 'rsi', 'atr', 'volume_ma']
-    feature_config = {'ema_periods': [9, 20, 50, 100, 200]}
+
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -95,13 +96,27 @@ class Burner920Strategy(BaseStrategy):
         # ── Soft Gate 4: Volume confirmation ──
         sg4 = df['volume_ma'].notna() & (df['volume'] > df['volume_ma'])
 
-        # ── Soft Gate 5: Hidden divergence ──
-        pl10, pl30 = df['low'].rolling(10).min(), df['low'].rolling(30).min()
-        ph10, ph30 = df['high'].rolling(10).max(), df['high'].rolling(30).max()
-        rl10, rl30 = rsi.rolling(10).min(), rsi.rolling(30).min()
-        rh10, rh30 = rsi.rolling(10).max(), rsi.rolling(30).max()
-        hd_bull = (pl10 > pl30.shift(10)) & (rl10 < rl30.shift(10))
-        hd_bear = (ph10 < ph30.shift(10)) & (rh10 > rh30.shift(10))
+        # ── Soft Gate 5: Hidden divergence (single-pass swing detection) ──
+        ORDER = 5
+        hd_bull = pd.Series(False, index=df.index)
+        hd_bear = pd.Series(False, index=df.index)
+        low_v, high_v, rsi_v = df['low'].values, df['high'].values, rsi.values
+
+        # Single-pass: detect all swings once over the full series
+        all_swing_lows = argrelextrema(low_v, np.less, order=ORDER)[0]
+        all_swing_highs = argrelextrema(high_v, np.greater, order=ORDER)[0]
+
+        # Hidden bullish: higher low in price, lower low in RSI
+        for j in range(1, len(all_swing_lows)):
+            prev, curr = all_swing_lows[j - 1], all_swing_lows[j]
+            if low_v[curr] > low_v[prev] and rsi_v[curr] < rsi_v[prev]:
+                hd_bull.iloc[max(0, curr - ORDER):curr + 1] = True
+
+        # Hidden bearish: lower high in price, higher high in RSI
+        for j in range(1, len(all_swing_highs)):
+            prev, curr = all_swing_highs[j - 1], all_swing_highs[j]
+            if high_v[curr] < high_v[prev] and rsi_v[curr] > rsi_v[prev]:
+                hd_bear.iloc[max(0, curr - ORDER):curr + 1] = True
         sg5 = (g1_bull & hd_bull) | (g1_bear & hd_bear)
 
         # ── Soft Gate 6: Market trap ──
@@ -111,7 +126,13 @@ class Burner920Strategy(BaseStrategy):
         bull_trap = (df['high'] > ph8) & (df['close'] < ph8)
         sg6 = (g1_bull & bear_trap) | (g1_bear & bull_trap)
 
-        soft = [sg1, sg2, sg3, sg4, sg5, sg6]
+        # ── Soft Gate 7: 200 EMA macro trend filter ──
+        ema200 = df['ema_200']
+        sg7_bull = ema200.notna() & (df['close'] > ema200)
+        sg7_bear = ema200.notna() & (df['close'] < ema200)
+        sg7 = (g1_bull & sg7_bull) | (g1_bear & sg7_bear)
+
+        soft = [sg1, sg2, sg3, sg4, sg5, sg6, sg7]
         total_s = len(soft)
         total = total_hard + total_s
         sp = sum(s.astype(float) for s in soft)
@@ -126,7 +147,7 @@ class Burner920Strategy(BaseStrategy):
         return df
 
     def calculate_sl(self, signal, df, signal_idx, atr):
-        if signal_idx < 10: return None
+        if signal_idx < 20: return None
         w = df.iloc[max(0, signal_idx - 20):signal_idx]
         if signal.direction == 'LONG':
             p = w['low'].rolling(5).min().iloc[-1]
@@ -144,9 +165,13 @@ class Burner920Strategy(BaseStrategy):
             a = hs[hs > signal.entry + 2.0 * risk].dropna().sort_values()
             t1 = round(a.iloc[0], 8) if len(a) >= 1 else round(signal.entry + 2.0 * risk, 8)
             t2 = round(a.iloc[-1], 8) if len(a) >= 2 else round(signal.entry + 4.0 * risk, 8)
+            if abs(t2 - t1) < atr * 0.1:
+                t2 = round(signal.entry + self.tp2_rr * risk, 8)
             return (t1, t2)
         ls = w['low'].rolling(3, center=True).min()
         b = ls[ls < signal.entry - 2.0 * risk].dropna().sort_values(ascending=False)
         t1 = round(b.iloc[0], 8) if len(b) >= 1 else round(signal.entry - 2.0 * risk, 8)
         t2 = round(b.iloc[-1], 8) if len(b) >= 2 else round(signal.entry - 4.0 * risk, 8)
+        if abs(t2 - t1) < atr * 0.1:
+            t2 = round(signal.entry - self.tp2_rr * risk, 8)
         return (t1, t2)

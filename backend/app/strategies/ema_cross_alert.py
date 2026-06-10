@@ -11,6 +11,7 @@ from datetime import datetime, timezone, timedelta
 
 import numpy as np
 import pandas as pd
+from scipy.signal import argrelextrema
 
 from app.core.base_strategy import BaseStrategy
 from app.core.indicators import compute_ema, compute_rsi, compute_atr
@@ -154,31 +155,36 @@ class EMACrossAlert(BaseStrategy):
         if 'low' not in df.columns or 'high' not in df.columns:
             return "Insufficient data"
 
-        rsi = df['rsi']
         lookback = 96 if timeframe == '30m' else 48
         if len(df) < lookback + 30:
             return "Insufficient data"
 
         window = df.iloc[-lookback:]
+        low_v = window['low'].values
+        high_v = window['high'].values
+        rsi_v = window['rsi'].values
 
-        pl10 = window['low'].rolling(10).min()
-        pl30 = window['low'].rolling(30).min()
-        ph10 = window['high'].rolling(10).max()
-        ph30 = window['high'].rolling(30).max()
-        rl10 = window['rsi'].rolling(10).min()
-        rl30 = window['rsi'].rolling(30).min()
-        rh10 = window['rsi'].rolling(10).max()
-        rh30 = window['rsi'].rolling(30).max()
+        ORDER = 5
+        swing_lows = argrelextrema(low_v, np.less, order=ORDER)[0]
+        swing_highs = argrelextrema(high_v, np.greater, order=ORDER)[0]
 
-        hd_bull = (pl10 > pl30.shift(10)) & (rl10 < rl30.shift(10))
-        hd_bear = (ph10 < ph30.shift(10)) & (rh10 > rh30.shift(10))
+        # Hidden bullish: higher low in price, lower low in RSI
+        bull_div = False
+        if len(swing_lows) >= 2:
+            prev, curr = swing_lows[-2], swing_lows[-1]
+            if low_v[curr] > low_v[prev] and rsi_v[curr] < rsi_v[prev]:
+                bull_div = True
 
-        recent_bullish = hd_bull.tail(24).any()
-        recent_bearish = hd_bear.tail(24).any()
+        # Hidden bearish: lower high in price, higher high in RSI
+        bear_div = False
+        if len(swing_highs) >= 2:
+            prev, curr = swing_highs[-2], swing_highs[-1]
+            if high_v[curr] < high_v[prev] and rsi_v[curr] > rsi_v[prev]:
+                bear_div = True
 
-        if recent_bullish:
+        if bull_div:
             return "Bullish divergence detected"
-        elif recent_bearish:
+        elif bear_div:
             return "Bearish divergence detected"
         return "None"
 
