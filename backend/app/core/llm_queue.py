@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 QueuePayload = Tuple[str, SetupSignal, Any, Dict[str, Any]]
 
 
-def _fetch_htf_df_for_llm(symbol: str, timeframe: str) -> Optional[Any]:
+def _fetch_htf_df_for_llm(symbol: str, timeframe: str, market_type: str = 'CRYPTO') -> Optional[Any]:
     """
     Fetch higher timeframe candles, auto-backfilling/top-up as needed,
     and return a pandas DataFrame.
@@ -52,7 +52,7 @@ def _fetch_htf_df_for_llm(symbol: str, timeframe: str) -> Optional[Any]:
 
     # 1. Fetch from DB
     try:
-        df = get_finalized_candles(symbol, timeframe, limit=limit)
+        df = get_finalized_candles(symbol, timeframe, limit=limit, market_type=market_type)
     except StaleDataError:
         logger.info(f"[LLMQueue] HTF {symbol}/{timeframe} is stale. Will trigger REST fetch.")
         df = pd.DataFrame()
@@ -105,7 +105,7 @@ def _fetch_htf_df_for_llm(symbol: str, timeframe: str) -> Optional[Any]:
                             continue
                         live_scanner._upsert_candle(candle_data, commit=False)
                     db.session.commit()
-                    df = get_finalized_candles(symbol, timeframe, limit=limit)
+                    df = get_finalized_candles(symbol, timeframe, limit=limit, market_type=market_type)
             except Exception as e:
                 logger.error(f"[LLMQueue] Failed to top up HTF {symbol}/{timeframe}: {e}")
 
@@ -186,7 +186,7 @@ class LLMQueueManager:
                 for tf in ('4h', '1d'):
                     if tf not in htf_data or htf_data[tf] is None or (isinstance(htf_data[tf], pd.DataFrame) and htf_data[tf].empty):
                         logger.info(f"[LLMQueue] Dynamic fetch HTF context: {signal.symbol} / {tf}")
-                        htf_df = _fetch_htf_df_for_llm(signal.symbol, tf)
+                        htf_df = _fetch_htf_df_for_llm(signal.symbol, tf, market_type=getattr(signal, 'market_type', 'CRYPTO'))
                         if htf_df is not None:
                             htf_data[tf] = htf_df
 
@@ -302,6 +302,7 @@ class LLMQueueManager:
                     prompt_text=prompt,
                     response_text=raw_response if raw_response else "",
                     parsed_verdict=parsed_verdict,
+                    market_type=getattr(signal, 'market_type', 'CRYPTO'),
                 )
                 db.session.add(new_log)
                 db.session.commit()
@@ -376,6 +377,7 @@ class LLMQueueManager:
                     verdict_status=v_str,
                     reasoning_text=verdict_data.reasoning,
                     trade_outcome='ACTIVE',
+                    market_type=getattr(signal, 'market_type', 'CRYPTO'),
                 )
                 db.session.add(new_sig)
                 db.session.commit()
@@ -407,6 +409,7 @@ class LLMQueueManager:
                     tp1=db_tp1,
                     tp2=db_tp2,
                     reasoning_text=verdict_data.reasoning,
+                    market_type=getattr(signal, 'market_type', 'CRYPTO'),
                 )
                 db.session.add(new_rejected)
                 db.session.commit()

@@ -71,11 +71,11 @@ class IndicatorService:
     MIN_CANDLES_REQUIRED = 20
 
     @staticmethod
-    def _fetch_candles_df(symbol: str, timeframe: str, limit: int = 250) -> pd.DataFrame:
+    def _fetch_candles_df(symbol: str, timeframe: str, limit: int = 250, market_type: str = 'CRYPTO') -> pd.DataFrame:
         """Query the most recent `limit` candles from DB, sorted ascending."""
         candles = (
             Candle.query
-            .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
             .order_by(Candle.open_time.desc())
             .limit(limit)
             .all()
@@ -91,14 +91,14 @@ class IndicatorService:
         return df
 
     @classmethod
-    def compute_all(cls, symbol: str, timeframe: str, include_series: bool = False) -> dict:
+    def compute_all(cls, symbol: str, timeframe: str, include_series: bool = False, market_type: str = 'CRYPTO') -> dict:
         """
         Compute all indicators for a given symbol/timeframe.
 
         Returns a dict with 'latest', 'series', 'warnings', 'candle_count',
         and 'last_updated'.
         """
-        df = cls._fetch_candles_df(symbol, timeframe, limit=cls.MIN_CANDLES_IDEAL)
+        df = cls._fetch_candles_df(symbol, timeframe, limit=cls.MIN_CANDLES_IDEAL, market_type=market_type)
         candle_count = len(df)
         warnings = []
 
@@ -121,7 +121,7 @@ class IndicatorService:
 
         last_open_time = df['open_time'].iloc[-1].isoformat()
 
-        cache_key = (symbol, timeframe, last_open_time)
+        cache_key = (symbol, timeframe, last_open_time, market_type)
         with cls._cache_lock:
             if cache_key in cls._cache:
                 cached = cls._cache[cache_key]

@@ -10,13 +10,16 @@ automatic_scaling:
   min_num_instances: 1
   max_num_instances: 2
 
+beta_settings:
+  cloud_sql_instances: [PROJECT_ID]:[REGION]:tbot-db
+
 env_variables:
   FLASK_APP: run.py
   FLASK_ENV: production
   LLM_PROVIDER: vertex_ai
   LLM_MAX_TOKENS: "65535"
   SIGNAL_EXPIRY_CANDLES: "3"
-  DATABASE_URL: postgresql://postgres.[PROJECT_REF]:[YOUR_PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
+  DATABASE_URL: postgresql://postgres:[YOUR_PASSWORD]@/signals_db?host=/cloudsql/[PROJECT_ID]:[REGION]:tbot-db
   TELEGRAM_BOT_TOKEN: "[YOUR_TELEGRAM_BOT_TOKEN]"
   TELEGRAM_CHAT_ID: "[YOUR_TELEGRAM_CHAT_ID]"
   LLM_MODEL: "[YOUR_LLM_MODEL]"

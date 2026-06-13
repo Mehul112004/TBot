@@ -1,11 +1,14 @@
 // Phase 4: TypeScript interfaces for live analysis sessions, watching setups, and SSE events
 
+export type MarketType = 'CRYPTO' | 'INDIAN';
+
 export interface AnalysisSession {
   session_id: string;
   symbol: string;
   strategy_names: string[];
   timeframes: string[];
   status: 'active' | 'stopping' | 'stopped';
+  market_type: MarketType;
   created_at: string;
   live_price: number | null;
   live_price_updated_at: string | null;
@@ -30,6 +33,7 @@ export interface WatchingSetup {
   detected_at: string;
   zone_description: string;
   condition_description: string;
+  market_type: MarketType;
 }
 
 export interface ConfirmedSignal {
@@ -50,6 +54,7 @@ export interface ConfirmedSignal {
   trade_outcome: 'ACTIVE' | 'HIT_TP1' | 'HIT_TP2' | 'HIT_SL' | 'EXPIRED';
   telegram_status: 'PENDING' | 'SENT' | 'FAILED';
   telegram_message_id: string | null;
+  market_type: MarketType;
   created_at: string;
   outcome_updated_at: string | null;
 }
@@ -68,6 +73,7 @@ export interface RejectedSignal {
   tp1: number | null;
   tp2: number | null;
   reasoning_text: string;
+  market_type: MarketType;
   created_at: string;
 }
 

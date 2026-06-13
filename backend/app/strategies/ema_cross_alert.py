@@ -36,6 +36,7 @@ class EMACrossAlert(BaseStrategy):
     min_confidence = 0.0
     require_htf_alignment = False
     allowed_regimes = []
+    allowed_market_types = ['CRYPTO']
     required_features = ['rsi', 'fvg', 'ob', 'sr']
     run_on_live_candle = True
 

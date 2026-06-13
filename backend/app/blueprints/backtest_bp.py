@@ -49,6 +49,8 @@ def run_backtest():
     if not symbol:
         return jsonify({'error': 'symbol is required'}), 400
 
+    market_type = data.get('market_type', 'CRYPTO')
+
     timeframe = data.get('timeframe', '').strip()
     if timeframe not in VALID_TIMEFRAMES:
         return jsonify({'error': f'timeframe must be one of: {", ".join(VALID_TIMEFRAMES)}'}), 400
@@ -115,6 +117,7 @@ def run_backtest():
         initial_capital=initial_capital,
         risk_pct=risk_pct,
         slippage_bps=slippage_bps,
+        market_type=market_type,
     )
 
     if result['status'] == 'FAILED':
@@ -147,13 +150,12 @@ def run_backtest():
 
 @backtest_bp.route('/history', methods=['GET'])
 def backtest_history():
-    """List past backtest runs, most recent first."""
-    runs = (
-        BacktestRun.query
-        .order_by(BacktestRun.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    """List past backtest runs, most recent first. Optional market_type filter."""
+    market_type = request.args.get('market_type')
+    query = BacktestRun.query
+    if market_type:
+        query = query.filter_by(market_type=market_type)
+    runs = query.order_by(BacktestRun.created_at.desc()).limit(50).all()
     return jsonify({
         'runs': [r.to_dict() for r in runs],
     }), 200

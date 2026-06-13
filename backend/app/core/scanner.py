@@ -29,6 +29,7 @@ from app.core.watching import WatchingManager
 from app.core.outcome_tracker import outcome_tracker
 from app.utils.binance import BinanceStreamManager, fetch_klines
 from app.core.config import CANDLE_WARMUP
+from app.providers.base import AbstractStreamManager
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,8 @@ class AnalysisSession:
     timeframes: list[str]
     created_at: datetime
     status: str = "active"  # active | stopping | stopped
-    stream_manager: Optional[BinanceStreamManager] = None
+    market_type: str = "CRYPTO"
+    stream_manager: Optional[AbstractStreamManager] = None
     live_price: Optional[float] = None
     live_price_updated_at: Optional[datetime] = None
 
@@ -69,6 +71,7 @@ class AnalysisSession:
             'strategy_names': self.strategy_names,
             'timeframes': self.timeframes,
             'status': self.status,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'live_price': self.live_price,
             'live_price_updated_at': self.live_price_updated_at.isoformat() if self.live_price_updated_at else None,
@@ -98,7 +101,7 @@ class LiveScanner:
         """Set the Flask app reference for app context in background threads."""
         self._app = app
 
-    def start_session(self, symbol: str, strategy_names: list[str], selected_timeframes: list[str] = None) -> dict:
+    def start_session(self, symbol: str, strategy_names: list[str], selected_timeframes: list[str] = None, market_type: str = 'CRYPTO') -> dict:
         """
         Start a new analysis session.
 
@@ -153,15 +156,29 @@ class LiveScanner:
                 
             session_id = str(uuid.uuid4())
 
-            # Create the WebSocket stream manager
-            stream = BinanceStreamManager(
-                symbol=symbol,
-                timeframes=timeframes,
-                on_candle_close=lambda sym, tf, data: self._on_candle_close(session_id, sym, tf, data),
-                on_price_update=lambda sym, price, ts: self._on_price_update(session_id, sym, price, ts),
-                on_live_candle=lambda sym, tf, data: self._on_live_candle(session_id, sym, tf, data),
-                on_reconnect=lambda sym: self._on_ws_reconnect(session_id, sym),
-            )
+            # Create the WebSocket stream manager via the provider layer
+            from app.providers import get_provider
+            provider = get_provider(market_type) if market_type != 'CRYPTO' else None
+
+            if provider is not None:
+                native_symbol = provider.resolve_symbol(symbol)
+                stream = provider.create_stream(
+                    symbol=native_symbol,
+                    timeframes=timeframes,
+                    on_candle_close=lambda sym, tf, data: self._on_candle_close(session_id, sym, tf, data),
+                    on_price_update=lambda sym, price, ts: self._on_price_update(session_id, sym, price, ts),
+                    on_live_candle=lambda sym, tf, data: self._on_live_candle(session_id, sym, tf, data),
+                    on_reconnect=lambda sym: self._on_ws_reconnect(session_id, sym),
+                )
+            else:
+                stream = BinanceStreamManager(
+                    symbol=symbol,
+                    timeframes=timeframes,
+                    on_candle_close=lambda sym, tf, data: self._on_candle_close(session_id, sym, tf, data),
+                    on_price_update=lambda sym, price, ts: self._on_price_update(session_id, sym, price, ts),
+                    on_live_candle=lambda sym, tf, data: self._on_live_candle(session_id, sym, tf, data),
+                    on_reconnect=lambda sym: self._on_ws_reconnect(session_id, sym),
+                )
 
             session = AnalysisSession(
                 session_id=session_id,
@@ -169,6 +186,7 @@ class LiveScanner:
                 strategy_names=strategy_names,
                 timeframes=timeframes,
                 created_at=datetime.utcnow(),
+                market_type=market_type,
                 stream_manager=stream,
             )
             self._sessions[session_id] = session
@@ -188,11 +206,11 @@ class LiveScanner:
                         logger.info(f"[LiveScanner]   Step 1/3: ✅ Session persisted.")
 
                         logger.info(f"[LiveScanner]   Step 2/3: Backfilling historical data for {timeframes}...")
-                        self._backfill_historical_data(symbol, timeframes)
+                        self._backfill_historical_data(symbol, timeframes, market_type)
                         logger.info(f"[LiveScanner]   Step 2/3: ✅ Backfill complete.")
 
                         logger.info(f"[LiveScanner]   Step 3/3: Ensuring S/R zones...")
-                        self._ensure_sr_zones(symbol, timeframes)
+                        self._ensure_sr_zones(symbol, timeframes, market_type)
                         logger.info(f"[LiveScanner]   Step 3/3: ✅ S/R zones ready.")
             except Exception as e:
                 logger.error(f"[LiveScanner] Background start failed for {session_id}: {e}")
@@ -275,6 +293,13 @@ class LiveScanner:
             if not session or session.status != "active":
                 return
 
+        # Market hours gating — skip processing when market is closed
+        if session.market_type == 'INDIAN':
+            from app.providers import get_provider
+            provider = get_provider('INDIAN')
+            if provider and not provider.is_market_open():
+                return
+
         with self._app.app_context():
             from app.core.indicator_service import IndicatorService
             from app.models.db import SRZone, Candle as CandleModel
@@ -283,17 +308,19 @@ class LiveScanner:
             from app.core.llm_queue import llm_queue
 
             try:
-                print(f"[LiveScanner] ── Candle close: {symbol}/{timeframe} "
+                mt = session.market_type
+                print(f"[LiveScanner] ── Candle close: {symbol}/{timeframe} [{mt}] "
                       f"close={candle_data['close']:.2f} vol={candle_data['volume']:.2f}")
 
                 # 1. Upsert the closed candle into DB
+                candle_data['market_type'] = mt
                 self._upsert_candle(candle_data)
 
                 # 1b. Gap detection & auto-heal
                 #     Must run AFTER upsert (incoming candle is valid data)
                 #     but BEFORE indicators (they need contiguous data)
                 gap_healed = self._detect_and_heal_gap(
-                    symbol, timeframe, candle_data['open_time']
+                    symbol, timeframe, candle_data['open_time'], market_type=mt
                 )
 
                 # 2. Invalidate indicator cache
@@ -303,9 +330,9 @@ class LiveScanner:
                 # 2b. Trigger S/R zone refresh based on candle timeframe (FIX-SR-1)
                 from app.core.sr_engine import SREngine
                 if timeframe in ('4h', '1d'):
-                    SREngine.full_refresh(symbol, timeframe)
+                    SREngine.full_refresh(symbol, timeframe, market_type=mt)
                 elif timeframe in ('1h', '15m'):
-                    SREngine.minor_update(symbol, timeframe)
+                    SREngine.minor_update(symbol, timeframe, market_type=mt)
 
                 # 3. Compute fresh indicators
                 indicator_result = IndicatorService.compute_all(symbol, timeframe, include_series=True)
@@ -319,6 +346,7 @@ class LiveScanner:
                 with SREngine.get_refresh_lock(symbol):
                     zones = SRZone.query.filter(
                         SRZone.symbol == symbol,
+                        SRZone.market_type == mt,
                         SRZone.price_level >= current_price - price_range,
                         SRZone.price_level <= current_price + price_range,
                     ).all()
@@ -327,7 +355,7 @@ class LiveScanner:
                 # 5. Build candle window for context logging
                 db_candles = (
                     CandleModel.query
-                    .filter_by(symbol=symbol, timeframe=timeframe)
+                    .filter_by(symbol=symbol, timeframe=timeframe, market_type=mt)
                     .order_by(CandleModel.open_time.desc())
                     .limit(50)
                     .all()
@@ -363,7 +391,7 @@ class LiveScanner:
                 print(f"[LiveScanner]    S/R zones in range: {len(sr_zones)}")
 
                 # 6. Fetch HTF context (for LLM context if needed later)
-                htf_candles = self._fetch_htf_candles(symbol, timeframe)
+                htf_candles = self._fetch_htf_candles(symbol, timeframe, market_type=mt)
 
                 # 7. Run strategies (v3 — unified DataFrame path, returns (signal, df))
                 signals_found = 0
@@ -378,6 +406,7 @@ class LiveScanner:
                         strategy=strategy,
                         symbol=symbol,
                         timeframe=timeframe,
+                        market_type=mt,
                     )
                     if result is None:
                         continue
@@ -419,6 +448,8 @@ class LiveScanner:
 
                 # Publish candle close event
                 sse_manager.publish("candle_close", {
+                    "session_id": session_id,
+                    "market_type": mt,
                     "symbol": symbol,
                     "timeframe": timeframe,
                     "close": candle_data['close'],
@@ -455,6 +486,7 @@ class LiveScanner:
 
         sse_manager.publish("price_update", {
             "session_id": session_id,
+            "market_type": session.market_type,
             "symbol": symbol,
             "price": price,
             "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
@@ -505,6 +537,7 @@ class LiveScanner:
                             'low': candle_data['low'],
                             'close': candle_data['close'],
                             'volume': candle_data['volume'],
+                            'market_type': session.market_type,
                         })
                 except Exception as e:
                     logger.error(f"[LiveScanner] Live candle DB persist error: {e}")
@@ -521,6 +554,7 @@ class LiveScanner:
 
         sse_manager.publish("live_candle", {
             "session_id": session_id,
+            "market_type": session.market_type,
             "symbol": symbol,
             "timeframe": timeframe,
             "open_time": candle_data["open_time"],      # ms int
@@ -558,9 +592,10 @@ class LiveScanner:
 
         with self._app.app_context():
             try:
+                mt = session.market_type
                 candles = (
                     CandleModel.query
-                    .filter_by(symbol=symbol, timeframe=timeframe)
+                    .filter_by(symbol=symbol, timeframe=timeframe, market_type=mt)
                     .order_by(CandleModel.open_time.desc())
                     .limit(200)
                     .all()
@@ -588,23 +623,24 @@ class LiveScanner:
                 print(f"[LiveScanner] Live strategy fetch error "
                       f"for {symbol}/{timeframe}: {e}")
 
-    def _backfill_historical_data(self, symbol: str, timeframes: list[str]):
+    def _backfill_historical_data(self, symbol: str, timeframes: list[str], market_type: str = 'CRYPTO'):
         """
-        Pre-flight data backfill: fetch historical candles via Binance REST API.
+        Pre-flight data backfill: fetch historical candles via provider REST API.
 
         Two modes:
-        1. Cold start: DB has fewer than MIN_BACKFILL_CANDLES → full historical fetch.
-        2. Top-up: DB has enough candles but may have a gap from backend downtime →
+        1. Cold start: DB has fewer than MIN_BACKFILL_CANDLES -> full historical fetch.
+        2. Top-up: DB has enough candles but may have a gap from backend downtime ->
            fetch from last stored candle to now to fill any restart gaps immediately.
 
         This ensures indicators have warm-up data AND the chart never has holes
         after a backend restart.
         """
         from app.models.db import Candle as CandleModel, db
+        from app.providers import get_provider
 
         for tf in timeframes:
             existing_count = CandleModel.query.filter_by(
-                symbol=symbol, timeframe=tf
+                symbol=symbol, timeframe=tf, market_type=market_type
             ).count()
 
             tf_minutes = TIMEFRAME_MINUTES.get(tf, 60)
@@ -614,7 +650,7 @@ class LiveScanner:
                 # ── Top-up mode: fill gap from last stored candle to now ──
                 last_candle = (
                     CandleModel.query
-                    .filter_by(symbol=symbol, timeframe=tf)
+                    .filter_by(symbol=symbol, timeframe=tf, market_type=market_type)
                     .order_by(CandleModel.open_time.desc())
                     .first()
                 )
@@ -631,7 +667,8 @@ class LiveScanner:
                     logger.info(f"[LiveScanner] Top-up backfill: {symbol}/{tf} — "
                                 f"fetching gap from {last_candle.open_time.isoformat()} to now...")
                     try:
-                        candles = fetch_klines(symbol, tf, gap_start_ms, now_ms)
+                        provider = get_provider(market_type)
+                        candles = provider.fetch_candles(symbol, tf, gap_start_ms, now_ms)
                         if candles:
                             upserted = 0
                             skipped = 0
@@ -662,7 +699,8 @@ class LiveScanner:
                 lookback_minutes = MIN_BACKFILL_CANDLES * tf_minutes * 1.2
                 start_ms = now_ms - int(lookback_minutes * 60 * 1000)
 
-                candles = fetch_klines(symbol, tf, start_ms, now_ms)
+                provider = get_provider(market_type)
+                candles = provider.fetch_candles(symbol, tf, start_ms, now_ms)
 
                 if not candles:
                     logger.warning(f"[LiveScanner] No historical data returned for {symbol}/{tf}")
@@ -690,7 +728,7 @@ class LiveScanner:
                 logger.error(f"[LiveScanner] Backfill failed for {symbol}/{tf}: {e}")
                 # Don't abort session — partial data is better than none
 
-    def _ensure_sr_zones(self, symbol: str, timeframes: list[str]):
+    def _ensure_sr_zones(self, symbol: str, timeframes: list[str], market_type: str = 'CRYPTO'):
         """
         On-demand S/R zone generation: if no zones exist for a symbol/timeframe,
         trigger SREngine.full_refresh() synchronously so S/R-based strategies
@@ -699,16 +737,16 @@ class LiveScanner:
         from app.models.db import SRZone
         from app.core.sr_engine import SREngine
 
-        logger.info(f"[LiveScanner] Checking S/R zones for {symbol}...")
+        logger.info(f"[LiveScanner] Checking S/R zones for {symbol} [{market_type}]...")
 
         # Generate zones for each timeframe that has enough data
         for tf in timeframes:
-            has_zones = SRZone.query.filter_by(symbol=symbol, timeframe=tf).first()
+            has_zones = SRZone.query.filter_by(symbol=symbol, timeframe=tf, market_type=market_type).first()
             if not has_zones:
                 try:
                     logger.info(f"[LiveScanner] No S/R zones found for {symbol}/{tf}. Generating now...")
-                    SREngine.full_refresh(symbol, tf)
-                    zone_count = SRZone.query.filter_by(symbol=symbol, timeframe=tf).count()
+                    SREngine.full_refresh(symbol, tf, market_type=market_type)
+                    zone_count = SRZone.query.filter_by(symbol=symbol, timeframe=tf, market_type=market_type).count()
                     logger.info(f"[LiveScanner] ✅ Generated {zone_count} S/R zones for {symbol}/{tf}")
                 except Exception as e:
                     logger.error(f"[LiveScanner] S/R zone generation failed for {symbol}/{tf}: {e}")
@@ -719,6 +757,8 @@ class LiveScanner:
         """Upsert a closed candle into the database."""
         from app.models.db import db, Candle as CandleModel
         from sqlalchemy.dialects.postgresql import insert
+
+        market_type = candle_data.get('market_type', 'CRYPTO')
 
         try:
             # Try PostgreSQL upsert first
@@ -731,6 +771,7 @@ class LiveScanner:
                 low=candle_data['low'],
                 close=candle_data['close'],
                 volume=candle_data['volume'],
+                market_type=market_type,
             )
             do_upsert = stmt.on_conflict_do_update(
                 index_elements=['symbol', 'timeframe', 'open_time'],
@@ -753,6 +794,7 @@ class LiveScanner:
                     symbol=candle_data['symbol'],
                     timeframe=candle_data['timeframe'],
                     open_time=candle_data['open_time'],
+                    market_type=market_type,
                 ).first()
                 if existing:
                     existing.open = candle_data['open']
@@ -763,7 +805,7 @@ class LiveScanner:
                 else:
                     db.session.add(CandleModel(**{
                         k: v for k, v in candle_data.items()
-                        if k in ('symbol', 'timeframe', 'open_time', 'open', 'high', 'low', 'close', 'volume')
+                        if k in ('symbol', 'timeframe', 'open_time', 'open', 'high', 'low', 'close', 'volume', 'market_type')
                     }))
                 if commit:
                     db.session.commit()
@@ -772,7 +814,8 @@ class LiveScanner:
                 print(f"[LiveScanner] Candle upsert fallback error: {e}")
 
     def _detect_and_heal_gap(
-        self, symbol: str, timeframe: str, incoming_open_time: datetime
+        self, symbol: str, timeframe: str, incoming_open_time: datetime,
+        market_type: str = 'CRYPTO',
     ) -> bool:
         """
         Compare incoming candle's open_time against the last stored candle
@@ -803,6 +846,7 @@ class LiveScanner:
             .filter(
                 CandleModel.symbol == symbol,
                 CandleModel.timeframe == timeframe,
+                CandleModel.market_type == market_type,
                 CandleModel.open_time < incoming_open_time,
             )
             .order_by(CandleModel.open_time.desc())
@@ -843,14 +887,16 @@ class LiveScanner:
         incoming_open_ms = int(incoming_open_time.timestamp() * 1000) - 1
 
         try:
-            backfill_candles = fetch_klines(
+            from app.providers import get_provider
+            provider = get_provider(market_type)
+            backfill_candles = provider.fetch_candles(
                 symbol, timeframe, expected_open_ms, incoming_open_ms
             )
 
             if not backfill_candles:
                 logger.error(
                     f"[GapHeal] REST API returned 0 candles for gap backfill "
-                    f"{symbol}/{timeframe} "
+                    f"{symbol}/{timeframe} [{market_type}] "
                     f"[{expected_next_open.isoformat()} → {incoming_open_time.isoformat()}]"
                 )
                 return False
@@ -858,6 +904,7 @@ class LiveScanner:
             # Insert backfilled candles sequentially
             healed_count = 0
             for candle_data in backfill_candles:
+                candle_data['market_type'] = market_type
                 self._upsert_candle(candle_data, commit=False)
                 healed_count += 1
 
@@ -886,6 +933,7 @@ class LiveScanner:
             strategy_names=json.dumps(session.strategy_names),
             timeframes=json.dumps(session.timeframes),
             status='active',
+            market_type=session.market_type,
         )
         db.session.add(record)
         db.session.commit()
@@ -900,7 +948,7 @@ class LiveScanner:
                 record.stopped_at = datetime.utcnow()
             db.session.commit()
 
-    def _fetch_htf_candles(self, symbol: str, timeframe: str) -> Optional[list[Candle]]:
+    def _fetch_htf_candles(self, symbol: str, timeframe: str, market_type: str = 'CRYPTO') -> Optional[list[Candle]]:
         """Fetch Higher Timeframe (HTF) context for the LLM prompt."""
         from app.models.db import Candle as CandleModel
         
@@ -926,7 +974,7 @@ class LiveScanner:
         try:
             db_candles = (
                 CandleModel.query
-                .filter_by(symbol=symbol, timeframe=htf)
+                .filter_by(symbol=symbol, timeframe=htf, market_type=market_type)
                 .order_by(CandleModel.open_time.desc())
                 .limit(10)
                 .all()

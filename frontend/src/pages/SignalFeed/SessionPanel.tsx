@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play, Square, Wifi, WifiOff, Loader2, Plus, X } from "lucide-react";
-import type { AnalysisSession, Strategy } from "../../types/signals";
+import type { AnalysisSession, Strategy, MarketType } from "../../types/signals";
+import { useMarket } from "../../contexts/MarketContext";
 
 interface SessionPanelProps {
   sessions: AnalysisSession[];
@@ -12,14 +13,22 @@ interface SessionPanelProps {
     symbol: string,
     strategyNames: string[],
     timeframes?: string[],
+    marketType?: MarketType,
   ) => void;
   onStopSession: (sessionId: string) => void;
 }
 
-/**
- * Session control panel — shows active sessions with live price,
- * and a form to start new sessions.
- */
+const CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+const INDIAN_SYMBOLS = [
+  "NIFTY", "BANKNIFTY", "SENSEX", "FINNIFTY",
+  "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+  "ITC", "SBIN", "BHARTIARTL", "KOTAKBANK", "LT",
+  "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "TITAN",
+  "MARUTI", "TATAMOTORS", "BAJFINANCE", "ASIANPAINT", "NESTLEIND",
+];
+const CRYPTO_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h", "1d"];
+const INDIAN_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "1d"];
+
 export default function SessionPanel({
   sessions,
   strategies,
@@ -30,14 +39,16 @@ export default function SessionPanel({
   onStopSession,
 }: SessionPanelProps) {
   const [showForm, setShowForm] = useState(false);
-  const [symbol, setSymbol] = useState("BTCUSDT");
+  const { marketType } = useMarket();
+
+  const symbols = marketType === 'INDIAN' ? INDIAN_SYMBOLS : CRYPTO_SYMBOLS;
+  const availableTimeframes = marketType === 'INDIAN' ? INDIAN_TIMEFRAMES : CRYPTO_TIMEFRAMES;
+
+  const [symbol, setSymbol] = useState(symbols[0]);
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>([
-    "1h",
+    marketType === 'INDIAN' ? "15m" : "1h",
   ]);
-
-  const AVAILABLE_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h", "1d"];
-  const AVAILABLE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
 
   const handleStart = () => {
     if (
@@ -50,11 +61,12 @@ export default function SessionPanel({
       symbol.toUpperCase(),
       selectedStrategies,
       selectedTimeframes,
+      marketType,
     );
     setShowForm(false);
-    setSymbol("BTCUSDT");
+    setSymbol(symbols[0]);
     setSelectedStrategies([]);
-    setSelectedTimeframes(["1h"]);
+    setSelectedTimeframes([marketType === 'INDIAN' ? "15m" : "1h"]);
   };
 
   const toggleStrategy = (name: string) => {
@@ -87,6 +99,13 @@ export default function SessionPanel({
             {connected ? <Wifi size={10} /> : <WifiOff size={10} />}
             {connected ? "Live" : "Disconnected"}
           </span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            marketType === 'INDIAN'
+              ? "bg-orange-500/20 text-orange-400"
+              : "bg-emerald-500/20 text-emerald-400"
+          }`}>
+            {marketType === 'INDIAN' ? 'NSE' : 'CRYPTO'}
+          </span>
         </div>
 
         {canStartNew && !showForm && (
@@ -114,9 +133,14 @@ export default function SessionPanel({
                   <span className="font-bold text-sm text-white">
                     {session.symbol}
                   </span>
+                  {session.market_type === 'INDIAN' && (
+                    <span className="text-[10px] px-1 py-0 rounded bg-orange-500/20 text-orange-400 border border-orange-500/30">
+                      NSE
+                    </span>
+                  )}
                   {session.live_price !== null && (
                     <span className="font-mono text-emerald-400 text-sm">
-                      $
+                      {marketType === 'INDIAN' ? '₹' : '$'}
                       {session.live_price.toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                       })}
@@ -166,14 +190,14 @@ export default function SessionPanel({
           {/* Symbol Input */}
           <div className="mb-3">
             <label className="block mb-1 text-slate-400 text-xs">
-              Trading Pair
+              {marketType === 'INDIAN' ? 'Symbol (NSE)' : 'Trading Pair'}
             </label>
             <select
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               className="bg-slate-700 px-3 py-2 border border-slate-600 focus:border-emerald-500 rounded-lg w-full text-sm text-white transition placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 appearance-none"
             >
-              {AVAILABLE_SYMBOLS.map((sym) => (
+              {symbols.map((sym) => (
                 <option key={sym} value={sym}>
                   {sym}
                 </option>
@@ -226,7 +250,7 @@ export default function SessionPanel({
               Timeframes
             </label>
             <div className="flex flex-wrap gap-2">
-              {AVAILABLE_TIMEFRAMES.map((tf) => (
+              {availableTimeframes.map((tf) => (
                 <button
                   key={tf}
                   onClick={() => toggleTimeframe(tf)}

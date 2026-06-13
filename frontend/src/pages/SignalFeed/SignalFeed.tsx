@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Eye, CheckCircle, XCircle } from "lucide-react";
 import { useSSE } from "../../hooks/useSSE";
 import { useAnalysisSessions } from "../../hooks/useAnalysisSessions";
+import { useMarket } from "../../contexts/MarketContext";
 import SessionPanel from "./SessionPanel";
 import WatchingTab from "./WatchingTab";
 import ConfirmedTab from "./ConfirmedTab";
@@ -18,17 +19,12 @@ import { apiClient } from "../../api/client";
 
 type Tab = "watching" | "confirmed" | "rejected";
 
-/**
- * Main Signal Feed page — the primary daily-use page.
- * Contains session panel, tab navigation, and watching/confirmed content.
- */
 export default function SignalFeed() {
   const [activeTab, setActiveTab] = useState<Tab>("watching");
   const [watchingSetups, setWatchingSetups] = useState<WatchingSetup[]>([]);
-  const [confirmedSignals, setConfirmedSignals] = useState<ConfirmedSignal[]>(
-    [],
-  );
+  const [confirmedSignals, setConfirmedSignals] = useState<ConfirmedSignal[]>([]);
   const [rejectedSignals, setRejectedSignals] = useState<RejectedSignal[]>([]);
+  const { marketType } = useMarket();
 
   const {
     sessions,
@@ -40,23 +36,23 @@ export default function SignalFeed() {
     setSessions,
   } = useAnalysisSessions();
 
-  // Fetch initial watching setups, confirmed signals, and rejected signals
+  // Fetch initial data — re-fetch when market type changes
   useEffect(() => {
     apiClient
-      .get("/signals/watching")
+      .get("/signals/watching", { params: { market_type: marketType } })
       .then((res) => setWatchingSetups(res.data.setups || []))
       .catch(() => {});
 
     apiClient
-      .get("/signals/confirmed")
+      .get("/signals/confirmed", { params: { market_type: marketType } })
       .then((res) => setConfirmedSignals(res.data.signals || []))
       .catch(() => {});
 
     apiClient
-      .get("/signals/rejected")
+      .get("/signals/rejected", { params: { market_type: marketType } })
       .then((res) => setRejectedSignals(res.data.signals || []))
       .catch(() => {});
-  }, []);
+  }, [marketType]);
 
   // Request notification permissions on load
   useEffect(() => {
@@ -68,6 +64,10 @@ export default function SignalFeed() {
   // SSE event handler
   const handleSSEEvent = useCallback(
     (eventType: SSEEventType, data: Record<string, unknown>) => {
+      // Filter events by active market type
+      const eventMarketType = data.market_type as string | undefined;
+      if (eventMarketType && eventMarketType !== marketType) return;
+
       switch (eventType) {
         case "setup_detected": {
           const setup = data as unknown as WatchingSetup;
@@ -97,7 +97,6 @@ export default function SignalFeed() {
               s.id === expired.id ? { ...s, status: "EXPIRED" as const } : s,
             ),
           );
-          // Remove expired cards after fade-out animation
           setTimeout(() => {
             setWatchingSetups((prev) =>
               prev.filter((s) => s.id !== expired.id),
@@ -106,7 +105,7 @@ export default function SignalFeed() {
           break;
         }
         case "session_stopped": {
-          const sessionId = (data as any).session_id;
+          const sessionId = (data as Record<string, unknown>).session_id as string;
           setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
           setWatchingSetups((prev) =>
             prev.filter((s) => s.session_id !== sessionId),
@@ -149,20 +148,20 @@ export default function SignalFeed() {
           break;
       }
     },
-    [setSessions],
+    [marketType, setSessions],
   );
 
   const { connected } = useSSE(handleSSEEvent);
 
   const handleStartSession = useCallback(
-    async (sym: string, strats: string[], timeframes?: string[]) => {
+    async (sym: string, strats: string[], timeframes?: string[], mt?: string) => {
       try {
-        await startSession(sym, strats, timeframes);
+        await startSession(sym, strats, timeframes, mt || marketType);
       } catch {
         // Error is handled in the hook
       }
     },
-    [startSession],
+    [startSession, marketType],
   );
 
   const handleStopSession = useCallback(
@@ -182,16 +181,26 @@ export default function SignalFeed() {
     const selectedStratNames = strategies
       .map((s) => s.name)
       .filter((name) => allowedStrategies.includes(name));
-    const timeframes = ["5m", "15m", "30m", "1h", "4h", "1d"];
 
-    try {
-      await handleStartSession("BTCUSDT", selectedStratNames, timeframes);
-      await handleStartSession("ETHUSDT", selectedStratNames, timeframes);
-      await handleStartSession("SOLUSDT", selectedStratNames, timeframes);
-    } catch (e) {
-      console.error("Quick Start failed", e);
+    if (marketType === 'INDIAN') {
+      const timeframes = ["5m", "15m", "1h"];
+      try {
+        await handleStartSession("NIFTY", selectedStratNames, timeframes, 'INDIAN');
+        await handleStartSession("RELIANCE", selectedStratNames, timeframes, 'INDIAN');
+      } catch (e) {
+        console.error("Indian Quick Start failed", e);
+      }
+    } else {
+      const timeframes = ["5m", "15m", "30m", "1h", "4h", "1d"];
+      try {
+        await handleStartSession("BTCUSDT", selectedStratNames, timeframes, 'CRYPTO');
+        await handleStartSession("ETHUSDT", selectedStratNames, timeframes, 'CRYPTO');
+        await handleStartSession("SOLUSDT", selectedStratNames, timeframes, 'CRYPTO');
+      } catch (e) {
+        console.error("Crypto Quick Start failed", e);
+      }
     }
-  }, [strategies, handleStartSession]);
+  }, [strategies, handleStartSession, marketType]);
 
   const watchingCount = watchingSetups.filter(
     (s) => s.status === "WATCHING",
@@ -213,7 +222,7 @@ export default function SignalFeed() {
             disabled={isLoading || strategies.length === 0 || !canStartNew}
             className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 shadow-sm px-4 py-2 rounded font-medium text-sm text-white transition disabled:cursor-not-allowed"
           >
-            Quick Start (BTC, ETH & SOL)
+            Quick Start ({marketType === 'INDIAN' ? 'NIFTY & RELIANCE' : 'BTC, ETH & SOL'})
           </button>
         </div>
 

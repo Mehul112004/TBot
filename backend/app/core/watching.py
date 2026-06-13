@@ -103,6 +103,7 @@ class WatchingManager:
                 expiry_candles=cls._get_expiry_candles(),
                 zone_description='',
                 condition_description='',
+                market_type=getattr(signal, 'market_type', 'CRYPTO'),
                 context_data=signal.context_data if hasattr(signal, 'context_data') else None,
             )
             db.session.add(setup)

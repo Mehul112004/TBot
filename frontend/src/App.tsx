@@ -7,7 +7,8 @@ import BacktestAnalyser from './pages/BacktestAnalyser/BacktestAnalyser';
 import Charts from './pages/Charts/Charts';
 import LLMPrompts from './pages/LLMPrompts/LLMPrompts';
 import PriceAlerts from './pages/PriceAlerts/PriceAlerts';
-import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X, Bell, FileSearch } from 'lucide-react';
+import { LineChart, LayoutDashboard, History, Bot, CandlestickChart, Menu, X, Bell, FileSearch, Coins, Landmark } from 'lucide-react';
+import { useMarket } from './contexts/MarketContext';
 
 function NavLink({ to, icon: Icon, label }: { to: string; icon: React.ElementType; label: string }) {
   const location = useLocation();
@@ -31,28 +32,31 @@ function NavLink({ to, icon: Icon, label }: { to: string; icon: React.ElementTyp
 function AppLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  const { marketType, setMarketType } = useMarket();
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
 
-    // Update browser tab title based on current route
     const titles: Record<string, string> = {
-      '/': 'Historical Data | Crypto Signals',
-      '/signal-feed': 'Signal Feed | Crypto Signals',
-      '/charts': 'Charts | Crypto Signals',
-      '/backtest': 'Backtest Engine | Crypto Signals',
-      '/backtest-analyser': 'Backtest Analyser | Crypto Signals',
-      '/llm-prompts': 'LLMPrompts | Crypto Signals',
-      '/price-alerts': 'Price Alerts | Crypto Signals',
+      '/': `Historical Data | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/signal-feed': `Signal Feed | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/charts': `Charts | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/backtest': `Backtest Engine | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/backtest-analyser': `Backtest Analyser | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/llm-prompts': `LLM Prompts | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
+      '/price-alerts': `Price Alerts | ${marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals'}`,
     };
-    document.title = titles[location.pathname] || 'Crypto Signals';
-  }, [location.pathname]);
+    document.title = titles[location.pathname] || 'Trading Bot';
+  }, [location.pathname, marketType]);
+
+  const accentColor = marketType === 'INDIAN' ? 'text-orange-400' : 'text-emerald-400';
+  const titleText = marketType === 'INDIAN' ? 'Indian Markets' : 'Crypto Signals';
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-slate-900 text-white overflow-hidden">
       {/* Mobile Top Bar */}
       <header className="md:hidden flex items-center justify-between p-4 bg-slate-800 border-b border-slate-700 z-20 flex-shrink-0">
-        <span className="text-xl font-bold text-emerald-400">Crypto Signals</span>
+        <span className={`text-xl font-bold ${accentColor}`}>{titleText}</span>
         <button
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700 focus:outline-none"
@@ -63,9 +67,38 @@ function AppLayout() {
 
       {/* Sidebar - Desktop */}
       <aside className="hidden md:flex w-64 bg-slate-800 border-r border-slate-700 flex-col flex-shrink-0">
-        <div className="p-4 text-xl font-bold border-b border-slate-700 text-emerald-400">
-          Crypto Signals
+        <div className={`p-4 text-xl font-bold border-b border-slate-700 ${accentColor}`}>
+          {titleText}
         </div>
+
+        {/* Market Toggle */}
+        <div className="px-4 py-3 border-b border-slate-700">
+          <div className="flex bg-slate-700/50 rounded-lg p-0.5">
+            <button
+              onClick={() => setMarketType('CRYPTO')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition ${
+                marketType === 'CRYPTO'
+                  ? 'bg-emerald-500/30 text-emerald-400'
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              <Coins size={14} />
+              Crypto
+            </button>
+            <button
+              onClick={() => setMarketType('INDIAN')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition ${
+                marketType === 'INDIAN'
+                  ? 'bg-orange-500/30 text-orange-400'
+                  : 'text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              <Landmark size={14} />
+              Indian
+            </button>
+          </div>
+        </div>
+
         <nav className="flex-1 p-4 space-y-2">
           <NavLink to="/signal-feed" icon={LayoutDashboard} label="Signal Feed" />
           <NavLink to="/charts" icon={CandlestickChart} label="Charts" />
@@ -80,16 +113,43 @@ function AppLayout() {
       {/* Mobile Sidebar Overlay/Drawer */}
       {isMobileMenuOpen && (
         <div className="md:hidden fixed inset-0 z-30 flex">
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm"
             onClick={() => setIsMobileMenuOpen(false)}
           />
-          {/* Drawer content */}
           <aside className="relative flex flex-col w-64 max-w-xs bg-slate-800 border-r border-slate-700 h-full p-4 space-y-4">
-            <div className="text-xl font-bold text-emerald-400 pb-4 border-b border-slate-700">
-              Crypto Signals
+            <div className={`text-xl font-bold pb-4 border-b border-slate-700 ${accentColor}`}>
+              {titleText}
             </div>
+
+            {/* Mobile Market Toggle */}
+            <div className="py-2 border-b border-slate-700">
+              <div className="flex bg-slate-700/50 rounded-lg p-0.5">
+                <button
+                  onClick={() => setMarketType('CRYPTO')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition ${
+                    marketType === 'CRYPTO'
+                      ? 'bg-emerald-500/30 text-emerald-400'
+                      : 'text-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  <Coins size={14} />
+                  Crypto
+                </button>
+                <button
+                  onClick={() => setMarketType('INDIAN')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition ${
+                    marketType === 'INDIAN'
+                      ? 'bg-orange-500/30 text-orange-400'
+                      : 'text-slate-400 hover:text-slate-300'
+                  }`}
+                >
+                  <Landmark size={14} />
+                  Indian
+                </button>
+              </div>
+            </div>
+
             <nav className="flex-1 space-y-2">
               <NavLink to="/signal-feed" icon={LayoutDashboard} label="Signal Feed" />
               <NavLink to="/charts" icon={CandlestickChart} label="Charts" />

@@ -17,11 +17,13 @@ class Candle(db.Model):
     close = db.Column(db.Float, nullable=False)
     volume = db.Column(db.Float, nullable=False)
     is_closed = db.Column(db.Boolean, default=True)  # Phase 3: Trap 1 defense
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
 
     def to_dict(self):
         return {
             'symbol': self.symbol,
             'timeframe': self.timeframe,
+            'market_type': self.market_type,
             'open_time': self.open_time.isoformat(),
             'open': self.open,
             'high': self.high,
@@ -46,12 +48,13 @@ class SRZone(db.Model):
     strength_score = db.Column(db.Float, default=0.0)              # 0.0–1.0, based on touches + tf weight
     touch_count = db.Column(db.Integer, default=0)                 # how many times price respected this level
     last_tested = db.Column(db.DateTime(timezone=True))            # when price last touched the zone
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
 
-    # Unique constraint: one zone per symbol+timeframe+price_level+method
+    # Unique constraint: one zone per symbol+timeframe+price_level+method+market
     __table_args__ = (
-        db.UniqueConstraint('symbol', 'timeframe', 'price_level', 'detection_method', name='uq_sr_zone'),
+        db.UniqueConstraint('symbol', 'timeframe', 'price_level', 'detection_method', 'market_type', name='uq_sr_zone'),
     )
 
     def to_dict(self):
@@ -59,6 +62,7 @@ class SRZone(db.Model):
             'id': self.id,
             'symbol': self.symbol,
             'timeframe': self.timeframe,
+            'market_type': self.market_type,
             'price_level': self.price_level,
             'zone_upper': self.zone_upper,
             'zone_lower': self.zone_lower,
@@ -131,6 +135,7 @@ class WatchingSetup(db.Model):
     condition_description = db.Column(db.Text, default='')               # e.g. "Bearish engulfing on 1h close"
     telegram_message_id = db.Column(db.String(50), nullable=True)        # Used to reply with verdicts
     context_data = db.Column(db.JSON, nullable=True)                     # Phase 3: snapshot of zones/indicators/events
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
 
     def to_dict(self):
         return {
@@ -147,6 +152,7 @@ class WatchingSetup(db.Model):
             'tp2': self.tp2,
             'notes': self.notes,
             'status': self.status,
+            'market_type': self.market_type,
             'candles_since_detected': self.candles_since_detected,
             'expiry_candles': self.expiry_candles,
             'detected_at': self.detected_at.isoformat() if self.detected_at else None,
@@ -170,6 +176,7 @@ class AnalysisSessionRecord(db.Model):
     strategy_names = db.Column(db.Text, nullable=False)                   # JSON array
     timeframes = db.Column(db.Text, nullable=False)                       # JSON array
     status = db.Column(db.String(20), default='active')                   # active / stopped
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     stopped_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
@@ -181,6 +188,7 @@ class AnalysisSessionRecord(db.Model):
             'strategy_names': json.loads(self.strategy_names) if self.strategy_names else [],
             'timeframes': json.loads(self.timeframes) if self.timeframes else [],
             'status': self.status,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'stopped_at': self.stopped_at.isoformat() if self.stopped_at else None,
         }
@@ -215,6 +223,7 @@ class ConfirmedSignal(db.Model):
     telegram_retries = db.Column(db.Integer, default=0)
     telegram_message_id = db.Column(db.String(50), nullable=True)         # Useful for reply
     
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     outcome_updated_at = db.Column(db.DateTime(timezone=True), nullable=True)
     context_data = db.Column(db.JSON, nullable=True)                     # Phase 3: snapshot of zones/indicators/events
@@ -238,6 +247,7 @@ class ConfirmedSignal(db.Model):
             'telegram_status': self.telegram_status,
             'telegram_retries': self.telegram_retries,
             'telegram_message_id': self.telegram_message_id,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'outcome_updated_at': self.outcome_updated_at.isoformat() if self.outcome_updated_at else None,
         }
@@ -263,6 +273,7 @@ class RejectedSignal(db.Model):
     tp2 = db.Column(db.Float, nullable=True)
     
     reasoning_text = db.Column(db.Text, nullable=False)
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
     def to_dict(self):
@@ -279,6 +290,7 @@ class RejectedSignal(db.Model):
             'tp1': self.tp1,
             'tp2': self.tp2,
             'reasoning_text': self.reasoning_text,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -317,6 +329,7 @@ class BacktestRun(db.Model):
     status = db.Column(db.String(20), default='RUNNING')         # RUNNING / COMPLETED / FAILED
     error_message = db.Column(db.Text, nullable=True)
     equity_curve = db.Column(db.Text, nullable=True)             # JSON array of {time, value}
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
 
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -349,6 +362,7 @@ class BacktestRun(db.Model):
             'best_trade_pnl': self.best_trade_pnl,
             'worst_trade_pnl': self.worst_trade_pnl,
             'status': self.status,
+            'market_type': self.market_type,
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
@@ -387,6 +401,7 @@ class BacktestTrade(db.Model):
     duration_mins = db.Column(db.Float)
     equity_at_entry = db.Column(db.Float)                       # Capital at time of entry (compounding baseline)
     notes = db.Column(db.Text, default='')
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
 
     def to_dict(self):
         return {
@@ -409,6 +424,7 @@ class BacktestTrade(db.Model):
             'rr_ratio': self.rr_ratio,
             'duration_mins': self.duration_mins,
             'equity_at_entry': self.equity_at_entry,
+            'market_type': self.market_type,
             'notes': self.notes,
         }
 
@@ -423,6 +439,7 @@ class PriceAlert(db.Model):
     status = db.Column(db.String(20), default='ACTIVE')           # ACTIVE / TRIGGERED / CANCELLED
     cross_state = db.Column(db.String(20), nullable=True)         # WAS_ABOVE / WAS_BELOW — tracks crossing side
     note = db.Column(db.Text, default='')
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
     triggered_at = db.Column(db.DateTime(timezone=True), nullable=True)
     cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -438,6 +455,7 @@ class PriceAlert(db.Model):
             'status': self.status,
             'cross_state': self.cross_state,
             'note': self.note,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'triggered_at': self.triggered_at.isoformat() if self.triggered_at else None,
             'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
@@ -460,6 +478,7 @@ class LLMPromptLog(db.Model):
     prompt_text = db.Column(db.Text, nullable=False)
     response_text = db.Column(db.Text, nullable=True)
     parsed_verdict = db.Column(db.String(20)) # CONFIRM, REJECT, MODIFY, ERROR
+    market_type = db.Column(db.String(10), default='CRYPTO', nullable=False, index=True)
     created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
 
     def to_dict(self):
@@ -472,5 +491,35 @@ class LLMPromptLog(db.Model):
             'prompt_text': self.prompt_text,
             'response_text': self.response_text,
             'parsed_verdict': self.parsed_verdict,
+            'market_type': self.market_type,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class IndianInstrument(db.Model):
+    """Angel One instrument master cache — token-to-symbol mapping."""
+    __tablename__ = 'indian_instruments'
+
+    token = db.Column(db.String(20), primary_key=True)
+    symbol = db.Column(db.String(100), nullable=False, index=True)
+    name = db.Column(db.String(200))
+    exchange = db.Column(db.String(10), nullable=False, index=True)
+    instrument_type = db.Column(db.String(20), nullable=False, index=True)  # EQUITY, FUTIDX, OPTIDX, etc.
+    lot_size = db.Column(db.Integer, default=1)
+    expiry = db.Column(db.Date, nullable=True, index=True)
+    strike_price = db.Column(db.Float, nullable=True)
+    tick_size = db.Column(db.Float, default=0.05)
+    last_updated = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    def to_dict(self):
+        return {
+            'token': self.token,
+            'symbol': self.symbol,
+            'name': self.name,
+            'exchange': self.exchange,
+            'instrument_type': self.instrument_type,
+            'lot_size': self.lot_size,
+            'expiry': self.expiry.isoformat() if self.expiry else None,
+            'strike_price': self.strike_price,
+            'tick_size': self.tick_size,
         }

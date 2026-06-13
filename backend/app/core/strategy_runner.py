@@ -24,6 +24,7 @@ class StrategyRunner:
         symbol: str,
         timeframe: str,
         min_confidence_override: Optional[float] = None,
+        market_type: str = 'CRYPTO',
     ) -> Optional[tuple]:
         """
         Live mode: Execute strategy on the latest candle data.
@@ -38,7 +39,7 @@ class StrategyRunner:
 
         try:
             lookback = strategy.get_required_lookback()
-            df = get_finalized_candles(symbol, timeframe, limit=lookback)
+            df = get_finalized_candles(symbol, timeframe, limit=lookback, market_type=market_type)
 
             if len(df) < strategy.get_min_candles():
                 return None, None
@@ -74,6 +75,7 @@ class StrategyRunner:
                 confidence=round(float(confidence), 4),
                 entry=entry,
                 regime=str(last.get('regime', 'UNKNOWN')),
+                market_type=market_type,
             )
 
             if atr_val > 0 and signal_idx >= 5:

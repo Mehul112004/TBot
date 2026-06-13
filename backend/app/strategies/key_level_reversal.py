@@ -33,6 +33,7 @@ class KeyLevelReversalStrategy(BaseStrategy):
     min_confidence = 0.70
 
     allowed_regimes = ["RANGING", "CHOPPY", "TRENDING_UP", "TRENDING_DOWN"]
+    allowed_market_types = ['CRYPTO']
     require_htf_alignment = False  # Reversals are inherently counter-trend
     sl_atr_mult = 1.5
     tp1_rr = 2.0

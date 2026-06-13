@@ -1,3 +1,4 @@
+import type { MarketType } from '../types/signals';
 import axios from 'axios';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001/api';
@@ -39,15 +40,17 @@ export interface CandleData {
   low: number;
   close: number;
   volume: number;
+  market_type?: string;
 }
 
 export const fetchCandles = async (
   symbol: string,
   timeframe: string,
-  limit = 500
+  limit = 500,
+  marketType?: string,
 ): Promise<{ candles: CandleData[]; count: number; symbol: string; timeframe: string }> => {
   const { data } = await apiClient.get('/data/candles', {
-    params: { symbol, timeframe, limit },
+    params: { symbol, timeframe, limit, market_type: marketType },
   });
   return data;
 };
@@ -207,12 +210,14 @@ export const fetchActiveSessions = async (): Promise<AnalysisSession[]> => {
 export const startSession = async (
   symbol: string,
   strategyNames: string[],
-  timeframes?: string[]
+  timeframes?: string[],
+  marketType: MarketType = 'CRYPTO',
 ): Promise<AnalysisSession> => {
   const { data } = await apiClient.post('/signals/sessions', {
     symbol,
     strategy_names: strategyNames,
     timeframes,
+    market_type: marketType,
   });
   return data.session;
 };
@@ -221,9 +226,9 @@ export const stopSession = async (sessionId: string): Promise<void> => {
   await apiClient.delete(`/signals/sessions/${sessionId}`);
 };
 
-export const fetchWatchingSetups = async (sessionId?: string): Promise<WatchingSetup[]> => {
+export const fetchWatchingSetups = async (sessionId?: string, marketType?: string): Promise<WatchingSetup[]> => {
   const { data } = await apiClient.get('/signals/watching', {
-    params: sessionId ? { session_id: sessionId } : {},
+    params: { ...(sessionId ? { session_id: sessionId } : {}), ...(marketType ? { market_type: marketType } : {}) },
   });
   return data.setups;
 };
@@ -237,13 +242,15 @@ export const fetchWatchingSetup = async (setupId: string): Promise<WatchingSetup
 
 import type { BacktestConfig, BacktestResult, BacktestRunSummary } from '../types/backtest';
 
-export const runBacktest = async (config: BacktestConfig): Promise<BacktestResult> => {
+export const runBacktest = async (config: BacktestConfig & { market_type?: string }): Promise<BacktestResult> => {
   const { data } = await apiClient.post('/backtest/run', config);
   return data;
 };
 
-export const fetchBacktestHistory = async (): Promise<BacktestRunSummary[]> => {
-  const { data } = await apiClient.get('/backtest/history');
+export const fetchBacktestHistory = async (marketType?: string): Promise<BacktestRunSummary[]> => {
+  const { data } = await apiClient.get('/backtest/history', {
+    params: marketType ? { market_type: marketType } : {},
+  });
   return data.runs;
 };
 
@@ -267,6 +274,7 @@ export interface LLMPromptLog {
   prompt_text: string;
   response_text: string | null;
   parsed_verdict: string;
+  market_type?: string;
   created_at: string;
 }
 
@@ -292,4 +300,25 @@ export const createAlert = async (payload: PriceAlertCreate): Promise<{ alert: P
 export const deleteAlert = async (alertId: string): Promise<{ alert: PriceAlert }> => {
   const { data } = await apiClient.delete(`/alerts/${alertId}`);
   return data;
+};
+
+// ---------- Market APIs ----------
+
+export const fetchMarketStatus = async () => {
+  const { data } = await apiClient.get('/market/status');
+  return data;
+};
+
+export const searchIndianInstruments = async (query: string) => {
+  const { data } = await apiClient.get('/market/instruments', {
+    params: { q: query, market_type: 'INDIAN' },
+  });
+  return data.instruments;
+};
+
+export const fetchOptionChain = async (symbol: string, expiry: string) => {
+  const { data } = await apiClient.get('/market/option-chain', {
+    params: { symbol, expiry },
+  });
+  return data.chain;
 };

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.sr_engine import SREngine
 from app.core.indicator_service import IndicatorService
-from app.core.config import SUPPORTED_SYMBOLS
+from app.core.config import SUPPORTED_SYMBOLS, SUPPORTED_INDIAN_SYMBOLS
 
 
 # Timeframes for each job type
@@ -28,10 +28,10 @@ scheduler = BackgroundScheduler(daemon=True)
 
 
 def _get_active_symbols(scanner):
-    """Return symbols with active sessions, or empty list if none."""
+    """Return active sessions with (symbol, market_type) pairs."""
     try:
         active_sessions = scanner.get_active_sessions()
-        return list({s['symbol'] for s in active_sessions})
+        return list({(s['symbol'], s.get('market_type', 'CRYPTO')) for s in active_sessions})
     except Exception:
         return []
 
@@ -43,18 +43,18 @@ def full_zone_refresh_4h(app, scanner):
     Invalidates indicator cache for affected symbol/timeframe pairs.
     """
     with app.app_context():
-        active_symbols = _get_active_symbols(scanner)
-        if not active_symbols:
+        active = _get_active_symbols(scanner)
+        if not active:
             print("[Scheduler] No active sessions — skipping 4h full refresh.")
             return
-        print(f"[Scheduler] Starting 4h S/R zone refresh for {active_symbols}...")
-        for symbol in active_symbols:
+        print(f"[Scheduler] Starting 4h S/R zone refresh for {active}...")
+        for symbol, market_type in active:
             for timeframe in FULL_REFRESH_4H_TIMEFRAMES:
                 try:
-                    SREngine.full_refresh(symbol, timeframe)
+                    SREngine.full_refresh(symbol, timeframe, market_type=market_type)
                     IndicatorService.invalidate_cache(symbol, timeframe)
                 except Exception as e:
-                    print(f"[Scheduler] Error refreshing {symbol}/{timeframe}: {e}")
+                    print(f"[Scheduler] Error refreshing {symbol}/{timeframe} [{market_type}]: {e}")
         print("[Scheduler] 4h full zone refresh complete.")
 
 
@@ -64,18 +64,18 @@ def full_zone_refresh_1d(app, scanner):
     For each active symbol × [1D]: full detection → merge → score → persist.
     """
     with app.app_context():
-        active_symbols = _get_active_symbols(scanner)
-        if not active_symbols:
+        active = _get_active_symbols(scanner)
+        if not active:
             print("[Scheduler] No active sessions — skipping 1D full refresh.")
             return
-        print(f"[Scheduler] Starting 1D S/R zone refresh for {active_symbols}...")
-        for symbol in active_symbols:
+        print(f"[Scheduler] Starting 1D S/R zone refresh for {active}...")
+        for symbol, market_type in active:
             for timeframe in FULL_REFRESH_1D_TIMEFRAMES:
                 try:
-                    SREngine.full_refresh(symbol, timeframe)
+                    SREngine.full_refresh(symbol, timeframe, market_type=market_type)
                     IndicatorService.invalidate_cache(symbol, timeframe)
                 except Exception as e:
-                    print(f"[Scheduler] Error refreshing {symbol}/{timeframe}: {e}")
+                    print(f"[Scheduler] Error refreshing {symbol}/{timeframe} [{market_type}]: {e}")
         print("[Scheduler] 1D full zone refresh complete.")
 
 
@@ -86,17 +86,17 @@ def minor_zone_update(app, scanner):
     Adds new swing points to DB without full recalculation.
     """
     with app.app_context():
-        active_symbols = _get_active_symbols(scanner)
-        if not active_symbols:
+        active = _get_active_symbols(scanner)
+        if not active:
             print("[Scheduler] No active sessions — skipping minor update.")
             return
-        print(f"[Scheduler] Starting minor S/R zone update for {active_symbols}...")
-        for symbol in active_symbols:
+        print(f"[Scheduler] Starting minor S/R zone update for {active}...")
+        for symbol, market_type in active:
             for timeframe in MINOR_UPDATE_TIMEFRAMES:
                 try:
-                    SREngine.minor_update(symbol, timeframe)
+                    SREngine.minor_update(symbol, timeframe, market_type=market_type)
                 except Exception as e:
-                    print(f"[Scheduler] Error updating {symbol}/{timeframe}: {e}")
+                    print(f"[Scheduler] Error updating {symbol}/{timeframe} [{market_type}]: {e}")
         print("[Scheduler] Minor zone update complete.")
 
 
@@ -104,20 +104,20 @@ def startup_full_refresh(app, scanner):
     """
     One-shot refresh fired on application boot (FIX-SCH-7).
     Ensures zones are fresh even if the server restarted mid-cycle.
+    Refreshes crypto + Indian symbols.
     """
     with app.app_context():
-        active_symbols = _get_active_symbols(scanner)
-        if not active_symbols:
-            # On cold start there may be no active sessions yet — refresh all supported symbols
-            active_symbols = SUPPORTED_SYMBOLS
-        print(f"[Scheduler] Startup full refresh for {active_symbols}...", flush=True)
-        for symbol in active_symbols:
+        active = _get_active_symbols(scanner)
+        if not active:
+            active = [(s, 'CRYPTO') for s in SUPPORTED_SYMBOLS]
+        print(f"[Scheduler] Startup full refresh for {active}...", flush=True)
+        for symbol, market_type in active:
             for timeframe in ALL_TIMEFRAMES:
                 try:
-                    SREngine.full_refresh(symbol, timeframe)
+                    SREngine.full_refresh(symbol, timeframe, market_type=market_type)
                     IndicatorService.invalidate_cache(symbol, timeframe)
                 except Exception as e:
-                    print(f"[Scheduler] Startup refresh error {symbol}/{timeframe}: {e}", flush=True)
+                    print(f"[Scheduler] Startup refresh error {symbol}/{timeframe} [{market_type}]: {e}", flush=True)
         print("[Scheduler] Startup full refresh complete.", flush=True)
 
 

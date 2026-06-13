@@ -14,3 +14,5 @@ gunicorn
 gevent
 pydantic
 google-genai
+smartapi-python
+pyotp

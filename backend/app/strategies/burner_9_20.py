@@ -31,6 +31,7 @@ class Burner920Strategy(BaseStrategy):
     min_confidence = 0.65  # Must pass 3 hard + 4 soft = 7/10
 
     allowed_regimes = ["TRENDING_UP", "TRENDING_DOWN"]
+    allowed_market_types = ['CRYPTO']
     require_htf_alignment = True
     sl_atr_mult = 1.5
     tp1_rr = 2.0

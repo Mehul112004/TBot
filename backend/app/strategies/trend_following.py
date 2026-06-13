@@ -30,6 +30,7 @@ class TrendFollowingStrategy(BaseStrategy):
     min_confidence = 0.55
 
     allowed_regimes = ["TRENDING_UP", "TRENDING_DOWN"]
+    allowed_market_types = ['CRYPTO']
     require_htf_alignment = True
     sl_atr_mult = 1.5
     tp1_rr = 2.0

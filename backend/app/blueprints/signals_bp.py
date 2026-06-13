@@ -44,6 +44,7 @@ def start_session():
     symbol = body.get('symbol')
     strategy_names = body.get('strategy_names', [])
     timeframes = body.get('timeframes', None)
+    market_type = body.get('market_type', 'CRYPTO')
 
     if not symbol:
         return jsonify({'error': 'Missing required field: symbol'}), 400
@@ -52,7 +53,7 @@ def start_session():
 
     try:
         from app.core.scanner import live_scanner
-        session = live_scanner.start_session(symbol, strategy_names, timeframes)
+        session = live_scanner.start_session(symbol, strategy_names, timeframes, market_type=market_type)
         return jsonify({'session': session}), 201
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
@@ -79,9 +80,20 @@ def list_watching():
 
     Query params:
         session_id (optional): Filter by session
+        market_type (optional): Filter by market type (CRYPTO/INDIAN)
     """
     from app.core.watching import WatchingManager
+    from app.models.db import WatchingSetup
     session_id = request.args.get('session_id')
+    market_type = request.args.get('market_type')
+
+    if market_type:
+        query = WatchingSetup.query.filter_by(status='WATCHING', market_type=market_type)
+        if session_id:
+            query = query.filter_by(session_id=session_id)
+        setups = query.order_by(WatchingSetup.detected_at.desc()).all()
+        return jsonify({'setups': [s.to_dict() for s in setups], 'count': len(setups)}), 200
+
     setups = WatchingManager.get_active_setups(session_id)
     return jsonify({'setups': setups, 'count': len(setups)}), 200
 
@@ -103,13 +115,21 @@ def list_confirmed_signals():
     """
     Get all confirmed/modified signals that have passed the LLM filter.
     Includes the origin session_id by joining WatchingSetup.
+
+    Query params:
+        market_type (optional): Filter by market type (CRYPTO/INDIAN)
     """
     from app.models.db import db, ConfirmedSignal, WatchingSetup
+
+    market_type = request.args.get('market_type')
     
-    results = db.session.query(ConfirmedSignal, WatchingSetup.session_id)\
-        .join(WatchingSetup, ConfirmedSignal.watching_setup_id == WatchingSetup.id)\
-        .order_by(ConfirmedSignal.created_at.desc())\
-        .all()
+    query = db.session.query(ConfirmedSignal, WatchingSetup.session_id)\
+        .join(WatchingSetup, ConfirmedSignal.watching_setup_id == WatchingSetup.id)
+    
+    if market_type:
+        query = query.filter(ConfirmedSignal.market_type == market_type)
+    
+    results = query.order_by(ConfirmedSignal.created_at.desc()).all()
         
     signals_list = []
     for sig, session_id in results:
@@ -125,13 +145,21 @@ def list_rejected_signals():
     """
     Get all rejected signals from the LLM filter.
     Includes the origin session_id by joining WatchingSetup.
+
+    Query params:
+        market_type (optional): Filter by market type (CRYPTO/INDIAN)
     """
     from app.models.db import db, RejectedSignal, WatchingSetup
+
+    market_type = request.args.get('market_type')
     
-    results = db.session.query(RejectedSignal, WatchingSetup.session_id)\
-        .join(WatchingSetup, RejectedSignal.watching_setup_id == WatchingSetup.id)\
-        .order_by(RejectedSignal.created_at.desc())\
-        .all()
+    query = db.session.query(RejectedSignal, WatchingSetup.session_id)\
+        .join(WatchingSetup, RejectedSignal.watching_setup_id == WatchingSetup.id)
+    
+    if market_type:
+        query = query.filter(RejectedSignal.market_type == market_type)
+    
+    results = query.order_by(RejectedSignal.created_at.desc()).all()
         
     signals_list = []
     for sig, session_id in results:

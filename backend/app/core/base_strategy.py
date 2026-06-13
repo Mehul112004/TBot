@@ -118,6 +118,7 @@ class SetupSignal:
     gates_failed: List[str] = field(default_factory=list)
     htf_context: Optional[dict] = None
     regime: str = "UNKNOWN"
+    market_type: str = "CRYPTO"
 
     def to_dict(self) -> dict:
         return {
@@ -135,6 +136,7 @@ class SetupSignal:
             'gates_passed': self.gates_passed,
             'gates_failed': self.gates_failed,
             'regime': self.regime,
+            'market_type': self.market_type,
         }
 
 
@@ -157,6 +159,10 @@ class BaseStrategy(ABC):
     # Which regimes this strategy is designed for (empty = all regimes)
     allowed_regimes: List[str] = []  # e.g. ['TRENDING_UP', 'TRENDING_DOWN']
     require_htf_alignment: bool = True
+
+    # ── Market type gating ──
+    # Which market types this strategy supports (default: crypto only)
+    allowed_market_types: List[str] = ['CRYPTO']
 
     # ── Confidence threshold ──
     min_confidence: float = 0.5  # Must pass at least 50% of total gates
@@ -245,6 +251,11 @@ class BaseStrategy(ABC):
             from app.core.indicators import compute_volume_ma
             if 'volume_ma' not in df.columns:
                 df['volume_ma'] = compute_volume_ma(df['volume'])
+
+        if 'vwap' in cls.required_features:
+            from app.core.indicators import compute_daily_vwap
+            if 'vwap' not in df.columns:
+                df['vwap'] = compute_daily_vwap(df)
 
         # ── Spatial state ──
         if 'fvg' in cls.required_features:

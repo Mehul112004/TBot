@@ -33,6 +33,7 @@ def get_finalized_candles(
     as_of_ms: Optional[int] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    market_type: str = 'CRYPTO',
 ) -> pd.DataFrame:
     """
     Returns ONLY closed candles. Time-agnostic — callers inject the reference time.
@@ -79,7 +80,7 @@ def get_finalized_candles(
     if is_backtest:
         candles = (
             Candle.query
-            .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
             .filter(Candle.open_time >= start_date)
             .filter(Candle.open_time <= end_date)
             .order_by(Candle.open_time.asc())
@@ -88,7 +89,7 @@ def get_finalized_candles(
     else:
         candles = (
             Candle.query
-            .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
             .order_by(Candle.open_time.desc())
             .limit(limit + 1)
             .all()

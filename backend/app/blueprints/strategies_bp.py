@@ -17,13 +17,20 @@ def list_strategies():
     """
     List all registered strategies with their current enabled state and metadata.
 
+    Query params:
+        market_type (optional): Filter strategies by market type (CRYPTO/INDIAN)
+
     Returns:
         JSON with list of strategy objects and count.
     """
     from app.core.strategy_loader import registry
-    all_strategies = registry.get_all()
+
+    market_type = request.args.get('market_type')
+    if market_type:
+        all_strategies = registry.get_all_metadata_for_market(market_type.upper())
+    else:
+        all_strategies = registry.get_all()
     
-    # Filter out strategies that should not be shown in the UI
     hidden_strategies = {"MACD Momentum", "RSI Reversal"}
     strategies = [s for s in all_strategies if s['name'] not in hidden_strategies]
     

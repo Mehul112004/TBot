@@ -176,3 +176,42 @@ def compute_volume_ma(volumes: pd.Series, period: int = 20) -> pd.Series:
       NaN:    First `period - 1` values are NaN.
     """
     return volumes.rolling(window=period).mean()
+
+
+def compute_vwap(df: pd.DataFrame) -> pd.Series:
+    """
+    Volume-Weighted Average Price (cumulative, resets daily at 00:00 UTC).
+    For Indian markets, the VWAP should reset at the session open (09:15 IST).
+
+    Contract:
+      Input:  DataFrame with columns ['high', 'low', 'close', 'volume']
+      Output: pd.Series of same index, float64
+      NaN:    No NaN — VWAP is cumulative from start
+    """
+    typical_price = (df['high'] + df['low'] + df['close']) / 3.0
+    cum_pv = (typical_price * df['volume']).cumsum()
+    cum_vol = df['volume'].cumsum()
+    vwap = np.where(cum_vol > 0, cum_pv / cum_vol, np.nan)
+    return pd.Series(vwap, index=df.index)
+
+
+def compute_daily_vwap(df: pd.DataFrame) -> pd.Series:
+    """
+    VWAP that resets each calendar day (UTC).
+    Suitable for markets that close/reset daily (Indian equities).
+
+    Contract:
+      Input:  DataFrame with columns ['open_time', 'high', 'low', 'close', 'volume']
+      Output: pd.Series of same index, float64
+    """
+    df = df.copy()
+    df['_date'] = pd.to_datetime(df['open_time']).dt.date
+    vwap = pd.Series(np.nan, index=df.index)
+
+    for _, group in df.groupby('_date'):
+        typical_price = (group['high'] + group['low'] + group['close']) / 3.0
+        cum_pv = (typical_price * group['volume']).cumsum()
+        cum_vol = group['volume'].cumsum()
+        vwap[group.index] = np.where(cum_vol > 0, cum_pv / cum_vol, np.nan)
+
+    return vwap

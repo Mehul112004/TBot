@@ -128,6 +128,7 @@ class StrategyRegistry:
                     'strategy_type': self._types.get(name, 'unknown'),
                     'enabled': self._enabled.get(name, True),
                     'min_confidence': instance.min_confidence,
+                    'allowed_market_types': getattr(instance, 'allowed_market_types', ['CRYPTO']),
                 })
         return result
 
@@ -143,6 +144,34 @@ class StrategyRegistry:
         """Look up a strategy by its name string."""
         with self._lock:
             return self._strategies.get(name)
+
+    def get_strategies_for_market(self, market_type: str) -> list[BaseStrategy]:
+        """Return strategies that support the given market type."""
+        with self._lock:
+            return [
+                instance for name, instance in self._strategies.items()
+                if self._enabled.get(name, True)
+                and (not hasattr(instance, 'allowed_market_types')
+                     or market_type in getattr(instance, 'allowed_market_types', ['CRYPTO']))
+            ]
+
+    def get_all_metadata_for_market(self, market_type: str) -> list[dict]:
+        """Return metadata for strategies available for a given market type."""
+        result = []
+        with self._lock:
+            for name, instance in self._strategies.items():
+                allowed = getattr(instance, 'allowed_market_types', ['CRYPTO'])
+                if market_type in allowed:
+                    result.append({
+                        'name': instance.name,
+                        'description': instance.description,
+                        'timeframes': instance.timeframes,
+                        'version': instance.version,
+                        'strategy_type': self._types.get(name, 'unknown'),
+                        'enabled': self._enabled.get(name, True),
+                        'min_confidence': instance.min_confidence,
+                    })
+        return result
 
     def is_enabled(self, name: str) -> bool:
         """Check if a strategy is currently enabled."""

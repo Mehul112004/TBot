@@ -33,6 +33,7 @@ class BreakoutRetestStrategy(BaseStrategy):
 
     # Only fire in trending markets — breakouts in ranges are false breaks
     allowed_regimes = ["TRENDING_UP", "TRENDING_DOWN"]
+    allowed_market_types = ['CRYPTO']
     require_htf_alignment = True
     sl_atr_mult = 1.5
     tp1_rr = 2.0

@@ -397,7 +397,7 @@ class SREngine:
     # ---------- Full Zone Detection Pipeline ----------
 
     @classmethod
-    def detect_zones(cls, symbol: str, timeframe: str, swing_lookback: int = 5) -> list[dict]:
+    def detect_zones(cls, symbol: str, timeframe: str, swing_lookback: int = 5, market_type: str = 'CRYPTO') -> list[dict]:
         """
         Full S/R zone detection pipeline for a symbol/timeframe:
         1. Fetch candles from DB
@@ -410,6 +410,7 @@ class SREngine:
             symbol: Trading pair
             timeframe: Candle timeframe
             swing_lookback: Lookback period for swing detection
+            market_type: Market type (CRYPTO/INDIAN)
 
         Returns:
             List of fully processed zone dicts ready for DB insertion
@@ -417,7 +418,7 @@ class SREngine:
         # Fetch candle data
         candles = (
             Candle.query
-            .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
             .order_by(Candle.open_time.desc())
             .limit(500)
             .all()
@@ -621,7 +622,7 @@ class SREngine:
     # ---------- Database Persistence ----------
 
     @classmethod
-    def persist_zones(cls, symbol: str, timeframe: str, zones: list[dict]):
+    def persist_zones(cls, symbol: str, timeframe: str, zones: list[dict], market_type: str = 'CRYPTO'):
         """
         Persist detected zones to the database.
         Uses upsert logic: update existing zones, insert new ones.
@@ -631,6 +632,7 @@ class SREngine:
             symbol: Trading pair
             timeframe: Candle timeframe
             zones: List of zone dicts from detect_zones()
+            market_type: Market type (CRYPTO/INDIAN)
         """
         if not zones:
             return
@@ -639,7 +641,7 @@ class SREngine:
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
             for zone in zones:
-                zone_record = cls._build_zone_record(zone)
+                zone_record = cls._build_zone_record(zone, market_type=market_type)
                 stmt = pg_insert(SRZone).values(**zone_record)
                 do_upsert = stmt.on_conflict_do_update(
                     constraint='uq_sr_zone',
@@ -659,11 +661,12 @@ class SREngine:
             # SQLite / generic fallback (test environment)
             db.session.rollback()
             for zone in zones:
-                zone_record = cls._build_zone_record(zone)
+                zone_record = cls._build_zone_record(zone, market_type=market_type)
                 existing = SRZone.query.filter_by(
                     symbol=zone_record['symbol'],
                     timeframe=zone_record['timeframe'],
                     price_level=zone_record['price_level'],
+                    market_type=market_type,
                 ).first()
                 if existing:
                     for key, val in zone_record.items():
@@ -672,10 +675,10 @@ class SREngine:
                     db.session.add(SRZone(**zone_record))
 
         db.session.commit()
-        print(f"[SREngine] Persisted {len(zones)} zones for {symbol}/{timeframe}")
+        print(f"[SREngine] Persisted {len(zones)} zones for {symbol}/{timeframe} [{market_type}]")
 
     @staticmethod
-    def _build_zone_record(zone: dict) -> dict:
+    def _build_zone_record(zone: dict, market_type: str = 'CRYPTO') -> dict:
         """Extract and round zone fields for DB insertion."""
         return {
             'symbol': zone['symbol'],
@@ -688,35 +691,36 @@ class SREngine:
             'strength_score': zone.get('strength_score', 0.0),
             'touch_count': zone.get('touch_count', 0),
             'last_tested': zone.get('last_tested'),
+            'market_type': market_type,
         }
 
     @classmethod
-    def full_refresh(cls, symbol: str, timeframe: str):
+    def full_refresh(cls, symbol: str, timeframe: str, market_type: str = 'CRYPTO'):
         """
         Full S/R zone refresh: detect all zones and persist to DB.
         Called on 4h candle close. Uses per-symbol lock to avoid races (FIX-SCH-3).
         """
-        print(f"[SREngine] Full refresh for {symbol}/{timeframe}...")
+        print(f"[SREngine] Full refresh for {symbol}/{timeframe} [{market_type}]...")
         with cls.get_refresh_lock(symbol):
-            zones = cls.detect_zones(symbol, timeframe)
+            zones = cls.detect_zones(symbol, timeframe, market_type=market_type)
             if zones:
-                cls.persist_zones(symbol, timeframe, zones)
+                cls.persist_zones(symbol, timeframe, zones, market_type=market_type)
             else:
-                print(f"[SREngine] No zones detected for {symbol}/{timeframe}")
+                print(f"[SREngine] No zones detected for {symbol}/{timeframe} [{market_type}]")
 
     @classmethod
-    def minor_update(cls, symbol: str, timeframe: str):
+    def minor_update(cls, symbol: str, timeframe: str, market_type: str = 'CRYPTO'):
         """
         Minor zone update: only swing point detection on latest data window.
         Called on 1h candle close. Adds new swing points without full recalculation.
         Uses per-symbol lock to avoid races (FIX-SCH-3).
         """
-        print(f"[SREngine] Minor update for {symbol}/{timeframe}...")
+        print(f"[SREngine] Minor update for {symbol}/{timeframe} [{market_type}]...")
 
         with cls.get_refresh_lock(symbol):
             candles = (
                 Candle.query
-                .filter_by(symbol=symbol, timeframe=timeframe)
+                .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
                 .order_by(Candle.open_time.desc())
                 .limit(50)  # Only recent window
                 .all()
@@ -753,7 +757,7 @@ class SREngine:
                 cls.score_zone(zone, df, timeframe,
                                formation_idx=zone.pop('_formation_idx', None))
 
-            cls.persist_zones(symbol, timeframe, swing_zones)
+            cls.persist_zones(symbol, timeframe, swing_zones, market_type=market_type)
 
         # Invalidate indicator cache after zone changes (FIX-SCH-4)
         IndicatorService.invalidate_cache(symbol, timeframe)

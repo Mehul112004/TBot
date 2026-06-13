@@ -525,6 +525,7 @@ class BacktestEngine:
         initial_capital: float = 10000.0,
         risk_pct: float = 0.01,
         slippage_bps: float = 10.0,
+        market_type: str = 'CRYPTO',
     ) -> dict:
         """
         Execute a full backtest.
@@ -551,6 +552,7 @@ class BacktestEngine:
             initial_capital=initial_capital,
             risk_per_trade=risk_pct,
             status='RUNNING',
+            market_type=market_type,
         )
         db.session.add(run_record)
         db.session.commit()
@@ -559,7 +561,7 @@ class BacktestEngine:
             # 1. Fetch candles from DB
             candles = (
                 Candle.query
-                .filter_by(symbol=symbol, timeframe=timeframe)
+                .filter_by(symbol=symbol, timeframe=timeframe, market_type=market_type)
                 .filter(Candle.open_time >= start_date)
                 .filter(Candle.open_time <= end_date)
                 .order_by(Candle.open_time.asc())

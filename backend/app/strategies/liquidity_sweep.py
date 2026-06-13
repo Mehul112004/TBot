@@ -35,6 +35,7 @@ class LiquiditySweepStrategy(BaseStrategy):
     min_confidence = 0.50  # Lower to get sufficient signals on 4h
 
     allowed_regimes = ["TRENDING_UP", "TRENDING_DOWN", "RANGING", "CHOPPY"]
+    allowed_market_types = ['CRYPTO']
     require_htf_alignment = False
     sl_atr_mult = 1.0
     tp1_rr = 1.5
