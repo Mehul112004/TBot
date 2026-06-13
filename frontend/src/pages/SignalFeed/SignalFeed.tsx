@@ -34,7 +34,7 @@ export default function SignalFeed() {
     isLoading,
     canStartNew,
     setSessions,
-  } = useAnalysisSessions();
+  } = useAnalysisSessions(marketType as MarketType);
 
   // Fetch initial data — re-fetch when market type changes
   useEffect(() => {

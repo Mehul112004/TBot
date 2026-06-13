@@ -96,6 +96,57 @@ def import_csv():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+@data_bp.route('/import/angelone', methods=['POST'])
+def import_angelone():
+    body = request.json
+    required_fields = ['symbol', 'timeframe', 'start_time', 'end_time']
+    if not all(k in body for k in required_fields):
+        return jsonify({"error": f"Missing fields. Required: {required_fields}"}), 400
+
+    symbol = body['symbol']
+    timeframe = body['timeframe']
+    
+    try:
+        start_ts = body['start_time']
+        end_ts = body['end_time']
+        
+        if isinstance(start_ts, str):
+            start_ts = int(datetime.fromisoformat(start_ts.replace('Z', '+00:00')).timestamp() * 1000)
+        if isinstance(end_ts, str):
+            end_ts = int(datetime.fromisoformat(end_ts.replace('Z', '+00:00')).timestamp() * 1000)
+
+        from app.providers.angelone_provider import AngelOneProvider
+        provider = AngelOneProvider()
+        
+        # Rate limiting protections are primarily on the frontend, but we limit to ~30 days for intraday
+        candles = provider.fetch_candles(symbol, timeframe, start_ts, end_ts)
+
+        if not candles:
+            return jsonify({"message": "No data returned from Angel One for this timeframe"}), 200
+
+        stmt = insert(Candle).values(candles)
+        do_upsert = stmt.on_conflict_do_update(
+            index_elements=['symbol', 'timeframe', 'open_time'],
+            set_={
+                'open': stmt.excluded.open,
+                'high': stmt.excluded.high,
+                'low': stmt.excluded.low,
+                'close': stmt.excluded.close,
+                'volume': stmt.excluded.volume,
+                'market_type': stmt.excluded.market_type
+            }
+        )
+        db.session.execute(do_upsert)
+        db.session.commit()
+
+        return jsonify({"message": "Success", "count": len(candles)}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
 @data_bp.route('/candles', methods=['GET'])
 def get_candles():
     """
@@ -139,25 +190,33 @@ def get_candles():
 
 @data_bp.route('/datasets', methods=['GET'])
 def get_datasets():
+    market_type = request.args.get('market_type')
     try:
-        # SELECT symbol, timeframe, MIN(open_time), MAX(open_time), COUNT(*) FROM candles GROUP BY symbol, timeframe
-        results = db.session.query(
+        # Include market_type in the grouping
+        query = db.session.query(
             Candle.symbol,
             Candle.timeframe,
+            Candle.market_type,
             func.min(Candle.open_time).label('start_time'),
             func.max(Candle.open_time).label('end_time'),
             func.count(Candle.open_time).label('count')
-        ).group_by(Candle.symbol, Candle.timeframe).all()
+        )
+        
+        if market_type:
+            query = query.filter(Candle.market_type == market_type.upper())
+            
+        results = query.group_by(Candle.symbol, Candle.timeframe, Candle.market_type).all()
 
         datasets = []
         for row in results:
             datasets.append({
                 "symbol": row.symbol,
                 "timeframe": row.timeframe,
+                "market_type": row.market_type,
                 "start_time": row.start_time.isoformat() if row.start_time else None,
                 "end_time": row.end_time.isoformat() if row.end_time else None,
                 "count": row.count,
-                "source": "Local Db" # Could dynamically query specific properties if tracked later
+                "source": "Local Db"
             })
 
         return jsonify({"datasets": datasets}), 200

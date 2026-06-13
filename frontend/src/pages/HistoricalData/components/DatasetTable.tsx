@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Database, AlertCircle } from 'lucide-react';
 import { fetchDatasets } from '../../../api/client';
+import { useMarket } from '../../../contexts/MarketContext';
 import { format } from 'date-fns';
 
 type Dataset = {
@@ -16,16 +17,17 @@ export default function DatasetTable({ refreshTrigger }: { refreshTrigger: numbe
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { marketType } = useMarket();
 
   useEffect(() => {
     loadDatasets();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, marketType]);
 
   const loadDatasets = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await fetchDatasets();
+      const data = await fetchDatasets(marketType);
       setDatasets(data || []);
     } catch (err: any) {
       console.error(err);

@@ -443,6 +443,7 @@ class AngelOneProvider(AbstractMarketProvider):
                     "low": float(row[3]),
                     "close": float(row[4]),
                     "volume": float(row[5]) if len(row) > 5 else 0,
+                    "market_type": "INDIAN",
                 })
 
             return all_candles

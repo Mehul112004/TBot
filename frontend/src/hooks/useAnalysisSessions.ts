@@ -13,7 +13,7 @@ interface UseAnalysisSessionsReturn {
   setSessions: React.Dispatch<React.SetStateAction<AnalysisSession[]>>;
 }
 
-export function useAnalysisSessions(): UseAnalysisSessionsReturn {
+export function useAnalysisSessions(marketType?: MarketType): UseAnalysisSessionsReturn {
   const [sessions, setSessions] = useState<AnalysisSession[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -23,8 +23,8 @@ export function useAnalysisSessions(): UseAnalysisSessionsReturn {
     const fetchInitial = async () => {
       try {
         const [sessRes, stratRes] = await Promise.all([
-          apiClient.get('/signals/sessions'),
-          apiClient.get('/strategies'),
+          apiClient.get('/signals/sessions', { params: marketType ? { market_type: marketType } : {} }),
+          apiClient.get('/strategies', { params: marketType ? { market_type: marketType } : {} }),
         ]);
         setSessions(sessRes.data.sessions || []);
         setStrategies(
@@ -35,7 +35,7 @@ export function useAnalysisSessions(): UseAnalysisSessionsReturn {
       }
     };
     fetchInitial();
-  }, []);
+  }, [marketType]);
 
   const startSession = useCallback(async (symbol: string, strategyNames: string[], timeframes?: string[], marketType: MarketType = 'CRYPTO') => {
     setIsLoading(true);

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { DownloadCloud, Loader2 } from 'lucide-react';
-import { importBinanceData } from '../../../api/client';
+import { importAngelOneData } from '../../../api/client';
 
-export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void }) {
-  const [symbol, setSymbol] = useState('BTCUSDT');
+export default function AngelOneImportForm({ onSuccess }: { onSuccess: () => void }) {
+  const [symbol, setSymbol] = useState('NIFTY');
   const [timeframe, setTimeframe] = useState('1h');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -17,26 +17,27 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
     try {
       const start = new Date(startDate);
       const end = new Date(endDate);
-
-      // Input datetime html5 handles local time zone, ensure we send ISO string standard format
-      const startIso = start.toISOString();
-      const endIso = end.toISOString();
       
+      // Calculate diff in days
       const diffTime = Math.abs(end.getTime() - start.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
 
+      // Rate limiting protections / data limitations
       if (end < start) {
         throw new Error("End date must be after start date.");
       }
       
-      if (timeframe !== '1d' && diffDays > 60) {
-        throw new Error("Cannot fetch more than 60 days of intraday data at once.");
+      if (timeframe !== '1d' && diffDays > 30) {
+        throw new Error("Cannot fetch more than 30 days of intraday data at once to respect rate limits.");
       }
-      if (timeframe === '1d' && diffDays > 365 * 5) {
-        throw new Error("Cannot fetch more than 5 years of daily data at once.");
+      if (timeframe === '1d' && diffDays > 365 * 2) {
+        throw new Error("Cannot fetch more than 2 years of daily data at once.");
       }
+
+      const startIso = start.toISOString();
+      const endIso = end.toISOString();
       
-      const result = await importBinanceData({
+      const result = await importAngelOneData({
         symbol,
         timeframe,
         start_time: startIso,
@@ -59,12 +60,14 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
         <select 
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-orange-500"
         >
-          <option value="BTCUSDT">BTCUSDT</option>
-          <option value="ETHUSDT">ETHUSDT</option>
-          <option value="SOLUSDT">SOLUSDT</option>
-          <option value="XRPUSDT">XRPUSDT</option>
+          <option value="NIFTY">NIFTY</option>
+          <option value="BANKNIFTY">BANKNIFTY</option>
+          <option value="RELIANCE">RELIANCE</option>
+          <option value="HDFCBANK">HDFCBANK</option>
+          <option value="TCS">TCS</option>
+          <option value="INFY">INFY</option>
         </select>
       </div>
 
@@ -73,13 +76,13 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
         <select 
           value={timeframe}
           onChange={(e) => setTimeframe(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-orange-500"
         >
+          <option value="1m">1m</option>
           <option value="5m">5m</option>
           <option value="15m">15m</option>
           <option value="30m">30m</option>
           <option value="1h">1h</option>
-          <option value="4h">4h</option>
           <option value="1d">1d</option>
         </select>
       </div>
@@ -92,7 +95,7 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
             required
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-orange-500"
           />
         </div>
         <div>
@@ -102,14 +105,14 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
             required
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-orange-500"
           />
         </div>
       </div>
 
       {statusMsg && (
         <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${
-          statusMsg.type === 'success' ? 'bg-emerald-900/40 text-emerald-400' : 'bg-red-900/40 text-red-400'
+          statusMsg.type === 'success' ? 'bg-orange-900/40 text-orange-400' : 'bg-red-900/40 text-red-400'
         }`}>
           {statusMsg.text}
         </div>
@@ -118,7 +121,7 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
       <button
         type="submit"
         disabled={isLoading}
-        className="w-full mt-4 flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-lg transition disabled:opacity-50"
+        className="w-full mt-4 flex items-center justify-center space-x-2 bg-orange-600 hover:bg-orange-500 text-white font-semibold py-2.5 px-4 rounded-lg transition disabled:opacity-50"
       >
         {isLoading ? (
           <Loader2 size={18} className="animate-spin" />

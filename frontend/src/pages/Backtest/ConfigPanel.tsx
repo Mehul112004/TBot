@@ -2,18 +2,19 @@ import { useState } from "react";
 import type { BacktestConfig } from "../../types/backtest";
 import type { StrategyInfo } from "../../api/client";
 
-const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
-const TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h", "1d"];
-
+const CRYPTO_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+const INDIAN_SYMBOLS = ["NIFTY", "BANKNIFTY", "RELIANCE", "HDFCBANK", "TCS", "INFY"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 
 interface Props {
   strategies: StrategyInfo[];
   onSubmit: (config: BacktestConfig) => void;
   loading: boolean;
+  marketType: string;
 }
 
-export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
-  const [symbol, setSymbol] = useState("BTCUSDT");
+export default function ConfigPanel({ strategies, onSubmit, loading, marketType }: Props) {
+  const [symbol, setSymbol] = useState(marketType === "INDIAN" ? "NIFTY" : "BTCUSDT");
   const [timeframe, setTimeframe] = useState("1h");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -90,7 +91,7 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
           className="bg-slate-700 px-3 py-2 border border-slate-600 focus:border-emerald-500 rounded-lg w-full text-sm text-white focus:ring-2 focus:ring-emerald-500/50 outline-none"
           id="backtest-symbol-select"
         >
-          {SYMBOLS.map((s) => (
+          {(marketType === 'INDIAN' ? INDIAN_SYMBOLS : CRYPTO_SYMBOLS).map((s) => (
             <option key={s} value={s}>
               {s}
             </option>

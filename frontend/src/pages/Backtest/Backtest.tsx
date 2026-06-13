@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { BacktestConfig, BacktestResult } from '../../types/backtest';
 import type { StrategyInfo } from '../../api/client';
 import { runBacktest, fetchStrategies } from '../../api/client';
+import { useMarket } from '../../contexts/MarketContext';
 import ConfigPanel from './ConfigPanel';
 import MetricsSummary from './MetricsSummary';
 import EquityCurve from './EquityCurve';
@@ -16,17 +17,18 @@ export default function Backtest() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ResultTab>('metrics');
+  const { marketType } = useMarket();
 
   useEffect(() => {
-    fetchStrategies().then(setStrategies).catch(console.error);
-  }, []);
+    fetchStrategies(marketType).then(setStrategies).catch(console.error);
+  }, [marketType]);
 
   const handleRunBacktest = async (config: BacktestConfig) => {
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const data = await runBacktest(config);
+      const data = await runBacktest({ ...config, market_type: marketType } as any);
       if (data.status === 'FAILED') {
         setError((data as unknown as { error?: string }).error || 'Backtest failed');
       } else {
@@ -74,6 +76,7 @@ export default function Backtest() {
             strategies={strategies}
             onSubmit={handleRunBacktest}
             loading={loading}
+            marketType={marketType}
           />
         </div>
 

@@ -8,10 +8,11 @@ interface Dataset {
   count: number;
 }
 
-const ALL_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h", "1d"];
+const ALL_TIMEFRAMES = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
 const CANDLE_LIMITS = [100, 250, 500, 1000, 2500];
 
 interface ChartControlsProps {
+  marketType: string;
   symbol: string;
   timeframe: string;
   limit: number;
@@ -31,6 +32,7 @@ interface ChartControlsProps {
 }
 
 export default function ChartControls({
+  marketType,
   symbol,
   timeframe,
   limit,
@@ -51,10 +53,10 @@ export default function ChartControls({
   const [datasets, setDatasets] = useState<Dataset[]>([]);
 
   useEffect(() => {
-    fetchDatasets()
+    fetchDatasets(marketType)
       .then((d: Dataset[]) => setDatasets(d))
       .catch(console.error);
-  }, []);
+  }, [marketType]);
 
   // Unique symbols from datasets
   const symbols = [...new Set(datasets.map((d) => d.symbol))].sort();

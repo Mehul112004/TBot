@@ -5,13 +5,15 @@ import ChartControls from './ChartControls';
 import CandleChart, { type CandleChartRef } from './CandleChart';
 import { useChartData } from './useChartData';
 import { Wifi, WifiOff, RotateCcw } from 'lucide-react';
+import { useMarket } from '../../contexts/MarketContext';
 
 export default function Charts() {
   const candleChartRef = useRef<CandleChartRef>(null);
+  const { marketType } = useMarket();
 
   /* ─── control state ─── */
-  const [symbol, setSymbol] = useState('BTCUSDT');
-  const [timeframe, setTimeframe] = useState('4h');
+  const [symbol, setSymbol] = useState(marketType === 'INDIAN' ? 'NIFTY' : 'BTCUSDT');
+  const [timeframe, setTimeframe] = useState('1h');
   const [limit, setLimit] = useState(500);
   const [showSRZones, setShowSRZones] = useState(true);
   const [minStrength, setMinStrength] = useState(0.2);
@@ -38,7 +40,7 @@ export default function Charts() {
     liveTick,
     closeTime,
     currentRegime,
-  } = useChartData(symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones);
+  } = useChartData(symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones, marketType);
 
   /* ─── SSE live candle + price updates ─── */
   const handleSSEEvent = useCallback(
@@ -117,6 +119,7 @@ export default function Charts() {
 
       {/* Controls */}
       <ChartControls
+        marketType={marketType}
         symbol={symbol}
         timeframe={timeframe}
         limit={limit}

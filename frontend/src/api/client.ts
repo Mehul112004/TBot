@@ -17,6 +17,11 @@ export const importBinanceData = async (payload: { symbol: string; timeframe: st
   return data;
 };
 
+export const importAngelOneData = async (payload: { symbol: string; timeframe: string; start_time: string; end_time: string }) => {
+  const { data } = await apiClient.post('/data/import/angelone', payload);
+  return data;
+};
+
 export const importCsvData = async (formData: FormData) => {
   const { data } = await apiClient.post('/data/import/csv', formData, {
     headers: {
@@ -26,8 +31,10 @@ export const importCsvData = async (formData: FormData) => {
   return data;
 };
 
-export const fetchDatasets = async () => {
-  const { data } = await apiClient.get('/data/datasets');
+export const fetchDatasets = async (marketType?: string) => {
+  const { data } = await apiClient.get('/data/datasets', {
+    params: marketType ? { market_type: marketType } : {},
+  });
   return data.datasets;
 };
 
@@ -193,8 +200,10 @@ export interface StrategyInfo {
   min_confidence: number;
 }
 
-export const fetchStrategies = async (): Promise<StrategyInfo[]> => {
-  const { data } = await apiClient.get('/strategies');
+export const fetchStrategies = async (marketType?: string): Promise<StrategyInfo[]> => {
+  const { data } = await apiClient.get('/strategies', {
+    params: marketType ? { market_type: marketType } : {},
+  });
   return data.strategies;
 };
 
