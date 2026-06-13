@@ -114,35 +114,37 @@ class IndianIntradayStrategy(BaseStrategy):
 
 ---
 
-## Strategy 4: Option Greeks-Based Entry
+## Strategy 4: Option-Aware Directional Strategy (MVP)
 
 **File:** `backend/app/strategies/indian_option_greeks.py`
 
-**Concept:** Trade Nifty/BankNifty options based on IV percentile, PCR, and delta/gamma dynamics. Targets ATM/OTM strikes with favorable risk-reward.
+**Concept:** Trades Nifty/BankNifty options by scanning the underlying for directional bias and applying option-specific gates (volatility proxy via BB width, trend strength). Designed for index options (weekly + monthly expiry).
+*Note: This is an MVP implementation that uses Bollinger Band width as a proxy for implied volatility expansion. A future Phase E iteration will incorporate actual Option Greeks (Delta, Theta), IV Percentile, and PCR.*
 
-**Timeframe:** 5m for index price, 1d for option metrics
+**Timeframe:** 15m
 **Regimes:** TRENDING_UP, TRENDING_DOWN
 **Min Confidence:** 0.70
-
-> **Note:** This strategy requires option chain data. It's more complex and recommended for Phase E (iteration after MVP).
 
 **Gates:**
 
 | # | Type | Description |
 |---|---|---|
-| G1 | HARD | Market regime confirmed (ADX > 25 and directional) |
-| G2 | HARD | IV Percentile between 20-80 (neither too low nor extreme) |
-| G3 | HARD | PCR (Put-Call Ratio) confirms direction: < 0.7 bullish, > 1.3 bearish |
-| G4 | SOFT | Option delta > 0.30 (LONG call) or > 0.30 (LONG put) — meaningful exposure |
-| G5 | SOFT | Theta decay low (> 3 DTE) — not fighting expiry decay |
-| G6 | SOFT | India VIX trending down (volatility contraction = favorable for directional) |
+| G1 | HARD | Market regime confirmed (ADX >= 25 and directional) |
+| G2 | HARD | EMA 50 trend alignment |
+| G3 | HARD | RSI not extreme (momentum, not exhaustion) |
+| G4 | HARD | ATR moderate (not extremely volatile: 0.1% to 3.0% of price) |
+| G5 | SOFT | Volume > average (confirms participation) |
+| G6 | SOFT | Bollinger Band width expanding (volatility expansion proxy) |
+| G7 | SOFT | RSI momentum increasing in signal direction |
+| G8 | SOFT | Bullish/bearish candle body aligns with direction |
+| G9 | SOFT | Close above/below EMA 21 |
 
-**Entry:** Limit order at option bid-ask mid
-**SL:** Based on option price (e.g., 30% of premium)
-**TP:** Based on underlying move (1% for index options = significant option % gain)
+**Entry:** Next candle open (options traded via underlying signal)
+**SL:** Beyond recent 5-bar pivot + ATR buffer
+**TP1:** 2x risk distance from entry
+**TP2:** 3.5x risk distance from entry
 
-**Required features:** `['ema', 'rsi', 'atr', 'adx', 'sr']`
-**New features:** `iv_percentile`, `pcr`, `option_greeks`, `india_vix`
+**Required features:** `['ema', 'rsi', 'atr', 'bb', 'volume_ma']`
 
 ---
 

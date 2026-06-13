@@ -24,7 +24,15 @@ TIMEFRAME_MINUTES = {
 def _get_candle_open_time(ts: datetime, tf_minutes: int) -> datetime:
     """Round timestamp down to the nearest candle open time."""
     minutes_since_midnight = ts.hour * 60 + ts.minute
-    bucket = (minutes_since_midnight // tf_minutes) * tf_minutes
+    
+    # Apply 15-minute offset for Indian market intraday timeframes
+    # This ensures 30m and 1h candles align with the 09:15 start time
+    if tf_minutes < 1440:
+        offset = 15
+        bucket = ((minutes_since_midnight - offset) // tf_minutes) * tf_minutes + offset
+    else:
+        bucket = (minutes_since_midnight // tf_minutes) * tf_minutes
+        
     return ts.replace(hour=bucket // 60, minute=bucket % 60, second=0, microsecond=0)
 
 
