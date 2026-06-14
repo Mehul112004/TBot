@@ -300,7 +300,7 @@ class AngelOneProvider(AbstractMarketProvider):
 
     def connect(self):
         import pyotp
-        from smartapi import SmartConnect
+        from SmartApi import SmartConnect
 
         self._smart = SmartConnect(api_key=self.api_key)
 
