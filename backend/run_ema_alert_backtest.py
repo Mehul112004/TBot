@@ -24,7 +24,11 @@ from app.core.indicators import compute_ema, compute_rsi, compute_atr
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+from app.core.config import get_supported_symbols
+
+SYMBOLS = get_supported_symbols()
+# Limit to a manageable set for backtesting
+SYMBOLS = SYMBOLS[:10] if len(SYMBOLS) > 10 else SYMBOLS
 TIMEFRAMES = ["30m", "1h"]
 DAYS_BACK = 45
 

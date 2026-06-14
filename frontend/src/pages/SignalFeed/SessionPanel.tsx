@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Play, Square, Wifi, WifiOff, Loader2, Plus, X } from "lucide-react";
 import type { AnalysisSession, Strategy } from "../../types/signals";
+import { fetchSymbols } from "../../api/client";
 
 interface SessionPanelProps {
   sessions: AnalysisSession[];
@@ -30,14 +31,29 @@ export default function SessionPanel({
   onStopSession,
 }: SessionPanelProps) {
   const [showForm, setShowForm] = useState(false);
-  const [symbol, setSymbol] = useState("BTCUSDT");
+  const [symbol, setSymbol] = useState("");
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>([
     "1h",
   ]);
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
+  const [symbolsLoading, setSymbolsLoading] = useState(true);
 
   const AVAILABLE_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h", "1d"];
-  const AVAILABLE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+
+  useEffect(() => {
+    fetchSymbols("binance")
+      .then((symbols) => {
+        setAvailableSymbols(symbols);
+        if (symbols.length > 0) setSymbol(symbols[0]);
+      })
+      .catch(() => {
+        const fallback = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+        setAvailableSymbols(fallback);
+        setSymbol(fallback[0]);
+      })
+      .finally(() => setSymbolsLoading(false));
+  }, []);
 
   const handleStart = () => {
     if (
@@ -52,7 +68,7 @@ export default function SessionPanel({
       selectedTimeframes,
     );
     setShowForm(false);
-    setSymbol("BTCUSDT");
+    setSymbol(availableSymbols[0] || "");
     setSelectedStrategies([]);
     setSelectedTimeframes(["1h"]);
   };
@@ -172,8 +188,10 @@ export default function SessionPanel({
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               className="bg-slate-700 px-3 py-2 border border-slate-600 focus:border-emerald-500 rounded-lg w-full text-sm text-white transition placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 appearance-none"
+              disabled={symbolsLoading}
             >
-              {AVAILABLE_SYMBOLS.map((sym) => (
+              {symbolsLoading && <option>Loading symbols...</option>}
+              {availableSymbols.map((sym) => (
                 <option key={sym} value={sym}>
                   {sym}
                 </option>

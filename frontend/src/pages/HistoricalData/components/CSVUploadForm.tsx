@@ -1,14 +1,28 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { UploadCloud, Loader2, FileUp } from 'lucide-react';
-import { importCsvData } from '../../../api/client';
+import { importCsvData, fetchSymbols } from '../../../api/client';
 
 export default function CSVUploadForm({ onSuccess }: { onSuccess: () => void }) {
-  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [symbol, setSymbol] = useState('');
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [timeframe, setTimeframe] = useState('1h');
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchSymbols("binance")
+      .then((symbols) => {
+        setAvailableSymbols(symbols);
+        if (symbols.length > 0) setSymbol(symbols[0]);
+      })
+      .catch(() => {
+        const fallback = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+        setAvailableSymbols(fallback);
+        setSymbol(fallback[0]);
+      });
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -54,10 +68,9 @@ export default function CSVUploadForm({ onSuccess }: { onSuccess: () => void }) 
           onChange={(e) => setSymbol(e.target.value)}
           className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
         >
-          <option value="BTCUSDT">BTCUSDT</option>
-          <option value="ETHUSDT">ETHUSDT</option>
-          <option value="SOLUSDT">SOLUSDT</option>
-          <option value="XRPUSDT">XRPUSDT</option>
+          {availableSymbols.map((sym) => (
+            <option key={sym} value={sym}>{sym}</option>
+          ))}
         </select>
       </div>
 

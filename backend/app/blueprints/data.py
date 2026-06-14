@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import func
 from app.models.db import db, Candle
-from app.utils.binance import fetch_klines
+from app.utils.binance import fetch_klines, fetch_futures_symbols, fetch_24hr_tickers
 from app.utils.csv_parser import parse_binance_csv
 from datetime import datetime
 
@@ -161,6 +161,58 @@ def get_datasets():
             })
 
         return jsonify({"datasets": datasets}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@data_bp.route('/symbols', methods=['GET'])
+def get_symbols():
+    """
+    Return all available USDT perpetual futures symbols from Binance.
+    Also supports returning locally stored symbols.
+
+    Query params:
+        source (optional): 'binance' | 'local' | 'all' (default 'binance')
+        sort (optional): 'volume' | 'alpha' (default 'alpha')
+    """
+    source = request.args.get('source', 'binance')
+    sort_by = request.args.get('sort', 'alpha')
+    try:
+        binance_symbols = []
+        if source in ('binance', 'all'):
+            try:
+                binance_symbols = fetch_futures_symbols()
+                if sort_by == 'volume':
+                    tickers = {t['symbol']: t['volume'] for t in fetch_24hr_tickers()}
+                    binance_symbols.sort(
+                        key=lambda s: tickers.get(s['symbol'], 0),
+                        reverse=True,
+                    )
+            except Exception as e:
+                if source == 'binance':
+                    return jsonify({"error": f"Binance unreachable: {str(e)}"}), 502
+
+        local_symbols = []
+        if source in ('local', 'all'):
+            rows = db.session.query(Candle.symbol).distinct().all()
+            local_symbols = [r[0] for r in rows]
+
+        if source == 'all':
+            all_symbols = list(set(local_symbols + [s['symbol'] for s in binance_symbols]))
+            all_symbols.sort()
+            return jsonify({"symbols": all_symbols, "count": len(all_symbols)}), 200
+
+        if source == 'local':
+            local_symbols.sort()
+            return jsonify({"symbols": local_symbols, "count": len(local_symbols)}), 200
+
+        symbols_list = [s['symbol'] for s in binance_symbols]
+        return jsonify({
+            "symbols": symbols_list,
+            "details": binance_symbols,
+            "count": len(symbols_list),
+        }), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500

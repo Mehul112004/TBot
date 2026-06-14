@@ -8,6 +8,72 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
+
+def fetch_futures_symbols() -> list[dict]:
+    """
+    Fetch all currently trading USDT perpetual futures pairs from Binance.
+
+    Returns:
+        List of dicts with keys: symbol, base_asset, quote_asset, status,
+        price_precision, quantity_precision, min_notional, filters.
+        Filters to only TRADING status, USDT-margined perpetuals.
+    """
+    url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+
+    symbols = []
+    for s in data.get("symbols", []):
+        if (
+            s.get("status") == "TRADING"
+            and s.get("contractType") == "PERPETUAL"
+            and s.get("quoteAsset") == "USDT"
+        ):
+            symbols.append({
+                "symbol": s["symbol"],
+                "base_asset": s["baseAsset"],
+                "quote_asset": s["quoteAsset"],
+                "status": s["status"],
+                "price_precision": s.get("pricePrecision", 2),
+                "quantity_precision": s.get("quantityPrecision", 2),
+                "min_notional": float(
+                    next(
+                        (f["notional"] for f in s.get("filters", []) if f.get("filterType") == "MIN_NOTIONAL"),
+                        5,
+                    )
+                ),
+            })
+    return symbols
+
+
+def fetch_24hr_tickers() -> list[dict]:
+    """
+    Fetch 24hr ticker statistics for all USDT perpetual futures.
+
+    Returns:
+        List of dicts with keys: symbol, price_change, price_change_pct,
+        last_price, high_price, low_price, volume (quote volume),
+        quote_volume (same as volume), number_of_trades.
+    """
+    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    return [
+        {
+            "symbol": t["symbol"],
+            "last_price": float(t.get("lastPrice", 0)),
+            "high_price": float(t.get("highPrice", 0)),
+            "low_price": float(t.get("lowPrice", 0)),
+            "volume": float(t.get("quoteVolume", 0)),  # USDT volume
+            "price_change_pct": float(t.get("priceChangePercent", 0)),
+        }
+        for t in data
+        if t.get("symbol", "").endswith("USDT")
+    ]
+
+
 def fetch_klines(symbol: str, interval: str, start_time: int, end_time: int):
     """
     Fetch OHLCV data from Binance REST API and paginate automatically.

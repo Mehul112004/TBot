@@ -1,14 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, X, Trash2, Bell, BellOff } from "lucide-react";
-import { fetchAlerts, createAlert, deleteAlert } from "../../api/client";
+import { fetchAlerts, createAlert, deleteAlert, fetchSymbols } from "../../api/client";
 import type { PriceAlert } from "../../types/alerts";
-
-const AVAILABLE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
 
 export default function PriceAlerts() {
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [symbol, setSymbol] = useState("BTCUSDT");
+  const [symbol, setSymbol] = useState("");
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [targetPrice, setTargetPrice] = useState("");
   const [direction, setDirection] = useState<"ABOVE" | "BELOW">("ABOVE");
   const [alertType, setAlertType] = useState<"ONCE" | "EVERY_TIME">("ONCE");
@@ -24,6 +23,19 @@ export default function PriceAlerts() {
     loadAlerts();
   }, [loadAlerts]);
 
+  useEffect(() => {
+    fetchSymbols("binance")
+      .then((symbols) => {
+        setAvailableSymbols(symbols);
+        if (symbols.length > 0 && !symbol) setSymbol(symbols[0]);
+      })
+      .catch(() => {
+        const fallback = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+        setAvailableSymbols(fallback);
+        if (!symbol) setSymbol(fallback[0]);
+      });
+  }, [symbol]);
+
   const handleCreate = async () => {
     if (!symbol || !targetPrice) return;
     setError("");
@@ -37,7 +49,7 @@ export default function PriceAlerts() {
         note: note || undefined,
       });
       setShowForm(false);
-      setSymbol("BTCUSDT");
+      setSymbol(availableSymbols[0] || "");
       setTargetPrice("");
       setDirection("ABOVE");
       setAlertType("ONCE");
@@ -120,7 +132,7 @@ export default function PriceAlerts() {
                 onChange={(e) => setSymbol(e.target.value)}
                 className="bg-slate-700 px-3 py-2 border border-slate-600 focus:border-emerald-500 rounded-lg w-full text-sm text-white transition placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 appearance-none"
               >
-                {AVAILABLE_SYMBOLS.map((sym) => (
+                {availableSymbols.map((sym) => (
                   <option key={sym} value={sym}>
                     {sym}
                   </option>

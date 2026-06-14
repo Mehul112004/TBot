@@ -182,14 +182,16 @@ export default function SignalFeed() {
     const selectedStratNames = strategies
       .map((s) => s.name)
       .filter((name) => allowedStrategies.includes(name));
+    if (selectedStratNames.length === 0) return;
     const timeframes = ["5m", "15m", "30m", "1h", "4h", "1d"];
+    const quickSymbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 
-    try {
-      await handleStartSession("BTCUSDT", selectedStratNames, timeframes);
-      await handleStartSession("ETHUSDT", selectedStratNames, timeframes);
-      await handleStartSession("SOLUSDT", selectedStratNames, timeframes);
-    } catch (e) {
-      console.error("Quick Start failed", e);
+    for (const sym of quickSymbols) {
+      try {
+        await handleStartSession(sym, selectedStratNames, timeframes);
+      } catch (e) {
+        console.error(`Quick Start failed for ${sym}`, e);
+      }
     }
   }, [strategies, handleStartSession]);
 

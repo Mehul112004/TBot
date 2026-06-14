@@ -10,7 +10,7 @@ export default function Charts() {
   const candleChartRef = useRef<CandleChartRef>(null);
 
   /* ─── control state ─── */
-  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [symbol, setSymbol] = useState('');
   const [timeframe, setTimeframe] = useState('4h');
   const [limit, setLimit] = useState(500);
   const [showSRZones, setShowSRZones] = useState(true);

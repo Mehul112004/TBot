@@ -11,6 +11,18 @@ export const apiClient = axios.create({
 
 // ---------- Phase 1: Historical Data ----------
 
+export interface FuturesSymbol {
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  status: string;
+}
+
+export const fetchSymbols = async (source: 'binance' | 'local' | 'all' = 'binance', sort: 'volume' | 'alpha' = 'alpha'): Promise<string[]> => {
+  const { data } = await apiClient.get('/data/symbols', { params: { source, sort } });
+  return data.symbols || [];
+};
+
 export const importBinanceData = async (payload: { symbol: string; timeframe: string; start_time: string; end_time: string }) => {
   const { data } = await apiClient.post('/data/import/binance', payload);
   return data;

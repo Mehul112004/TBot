@@ -1,14 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DownloadCloud, Loader2 } from 'lucide-react';
-import { importBinanceData } from '../../../api/client';
+import { importBinanceData, fetchSymbols } from '../../../api/client';
 
 export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void }) {
-  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [symbol, setSymbol] = useState('');
+  const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [timeframe, setTimeframe] = useState('1h');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{type: 'success'|'error', text: string} | null>(null);
+
+  useEffect(() => {
+    fetchSymbols("binance")
+      .then((symbols) => {
+        setAvailableSymbols(symbols);
+        if (symbols.length > 0) setSymbol(symbols[0]);
+      })
+      .catch(() => {
+        const fallback = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"];
+        setAvailableSymbols(fallback);
+        setSymbol(fallback[0]);
+      });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,10 +58,9 @@ export default function BinanceImportForm({ onSuccess }: { onSuccess: () => void
           onChange={(e) => setSymbol(e.target.value)}
           className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
         >
-          <option value="BTCUSDT">BTCUSDT</option>
-          <option value="ETHUSDT">ETHUSDT</option>
-          <option value="SOLUSDT">SOLUSDT</option>
-          <option value="XRPUSDT">XRPUSDT</option>
+          {availableSymbols.map((sym) => (
+            <option key={sym} value={sym}>{sym}</option>
+          ))}
         </select>
       </div>
 
