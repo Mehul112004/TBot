@@ -26,6 +26,7 @@ def get_indicators():
     """
     symbol = request.args.get('symbol')
     timeframe = request.args.get('timeframe')
+    market_type = request.args.get('market_type', 'CRYPTO')
     include_series = request.args.get('include_series', 'false').lower() == 'true'
 
     if not symbol or not timeframe:
@@ -41,7 +42,7 @@ def get_indicators():
         }), 400
 
     try:
-        result = IndicatorService.compute_all(symbol, timeframe, include_series=include_series)
+        result = IndicatorService.compute_all(symbol, timeframe, include_series=include_series, market_type=market_type)
         return jsonify(result), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

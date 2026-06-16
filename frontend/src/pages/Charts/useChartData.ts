@@ -58,6 +58,7 @@ export function useChartData(
   minStrength: number,
   showEMA: boolean,
   showSMCZones: boolean,
+  marketType: string,
 ) {
   const [state, setState] = useState<ChartDataState>({
     candles: [],
@@ -92,10 +93,10 @@ export function useChartData(
         ReturnType<typeof fetchIndicators> | Promise<null>,
         ReturnType<typeof fetchSMCZones> | Promise<null>,
       ] = [
-        fetchCandles(symbol, timeframe, limit),
-        showSRZones ? fetchSRZones(symbol, timeframe, minStrength) : Promise.resolve(null),
-        showEMA ? fetchIndicators(symbol, timeframe, true) : Promise.resolve(null),
-        showSMCZones ? fetchSMCZones(symbol, timeframe, Math.min(limit, 300)) : Promise.resolve(null),
+        fetchCandles(symbol, timeframe, limit), // fetchCandles could also take marketType if implemented, but we just want to fix SR/SMC/Indicators
+        showSRZones ? fetchSRZones(symbol, timeframe, minStrength, undefined, marketType) : Promise.resolve(null),
+        showEMA ? fetchIndicators(symbol, timeframe, true, marketType) : Promise.resolve(null),
+        showSMCZones ? fetchSMCZones(symbol, timeframe, Math.min(limit, 300), marketType) : Promise.resolve(null),
       ];
 
       const [candleResult, srResult, indicatorResult, smcResult] = await Promise.all(promises);
@@ -156,7 +157,7 @@ export function useChartData(
         error: err instanceof Error ? err.message : 'Failed to load chart data',
       }));
     }
-  }, [symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones]);
+  }, [symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones, marketType]);
 
   // Debounced refetch when inputs change
   useEffect(() => {

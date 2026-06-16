@@ -122,10 +122,11 @@ export interface SRZonesResponse {
 export const fetchIndicators = async (
   symbol: string,
   timeframe: string,
-  includeSeries = false
+  includeSeries = false,
+  marketType?: string
 ): Promise<IndicatorResponse> => {
   const { data } = await apiClient.get('/indicators', {
-    params: { symbol, timeframe, include_series: includeSeries },
+    params: { symbol, timeframe, include_series: includeSeries, market_type: marketType },
   });
   return data;
 };
@@ -134,7 +135,8 @@ export const fetchSRZones = async (
   symbol: string,
   timeframe?: string,
   minStrength?: number,
-  nearPrice?: number
+  nearPrice?: number,
+  marketType?: string
 ): Promise<SRZonesResponse> => {
   const { data } = await apiClient.get('/sr-zones', {
     params: {
@@ -142,6 +144,7 @@ export const fetchSRZones = async (
       timeframe,
       min_strength: minStrength,
       near_price: nearPrice,
+      market_type: marketType,
     },
   });
   return data;
@@ -149,9 +152,10 @@ export const fetchSRZones = async (
 
 export const refreshSRZones = async (
   symbol: string,
-  timeframe?: string
+  timeframe?: string,
+  marketType?: string
 ): Promise<{ message: string; results: { symbol: string; timeframe: string; zones_detected: number }[] }> => {
-  const { data } = await apiClient.post('/sr-zones/refresh', { symbol, timeframe });
+  const { data } = await apiClient.post('/sr-zones/refresh', { symbol, timeframe, market_type: marketType });
   return data;
 };
 
@@ -180,10 +184,11 @@ export interface SMCZonesResponse {
 export const fetchSMCZones = async (
   symbol: string,
   timeframe: string,
-  limit = 200
+  limit = 200,
+  marketType?: string
 ): Promise<SMCZonesResponse> => {
   const { data } = await apiClient.get('/sr-zones/smc-zones', {
-    params: { symbol, timeframe, limit },
+    params: { symbol, timeframe, limit, market_type: marketType },
   });
   return data;
 };

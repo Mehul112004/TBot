@@ -52,7 +52,7 @@ class AngelOneStreamManager(AbstractStreamManager):
         on_price_update: Callable,
         on_live_candle: Optional[Callable] = None,
         on_reconnect: Optional[Callable] = None,
-        smart_api=None,
+        provider=None,
         max_retries: int = 20,
     ):
         self.tokens = tokens
@@ -63,7 +63,7 @@ class AngelOneStreamManager(AbstractStreamManager):
         self.on_price_update = on_price_update
         self.on_live_candle = on_live_candle
         self.on_reconnect = on_reconnect
-        self._smart_api = smart_api
+        self._provider = provider
         self.max_retries = max_retries
 
         self._thread: Optional[threading.Thread] = None
@@ -86,7 +86,8 @@ class AngelOneStreamManager(AbstractStreamManager):
             if not symbol:
                 return
 
-            ltp = float(tick_data.get('last_traded_price', 0) or 0)
+            raw_ltp = float(tick_data.get('last_traded_price', 0) or 0)
+            ltp = raw_ltp / 100.0
             if ltp <= 0:
                 return
 
@@ -193,50 +194,100 @@ class AngelOneStreamManager(AbstractStreamManager):
                 logger.error(f"[AngelOneWS] Error in on_reconnect: {e}")
 
     def _run_websocket(self):
-        """Connect and subscribe to Angel One WebSocket."""
-        try:
-            from smartapi import WebSocket as AngelWebSocket
+        """Connect and subscribe to Angel One WebSocket 2.0."""
+        from SmartApi.smartWebSocketV2 import SmartWebSocketV2
+        
+        while self._running:
+            try:
+                if not self._provider:
+                    return
 
-            ws_client = AngelWebSocket(
-                feed_token=self._smart_api._feed_token,
-                client_code=self._smart_api._client_code,
-            )
-            ws_client.on_tick = self._on_tick
-            ws_client.on_connect = self._on_connect
-            ws_client.on_close = self._on_close
-            ws_client.on_error = self._on_error
+                self._provider._ensure_valid_session()
 
-            self._ws = ws_client
+                ws_client = SmartWebSocketV2(
+                    self._provider._auth_token,
+                    self._provider.api_key,
+                    self._provider.client_code,
+                    self._provider._feed_token,
+                    max_retry_attempt=3
+                )
 
-            ws_client.connect()
-            ws_client.subscribe(self.tokens, "mw")
+                def on_data(ws, message):
+                    self._on_tick(message)
+                    
+                def on_open(ws):
+                    self._on_connect()
+                    from app.models.db import IndianInstrument
+                    nse_tokens = []
+                    nfo_tokens = []
+                    # Segregate tokens into exchange types (1=NSE, 2=NFO)
+                    for t in self.tokens:
+                        # In a real context we would want a DB session, but we can do a quick check
+                        # assuming token length or pattern, or ideally the DB has it
+                        # But since this runs in a thread, DB queries here might need an app context
+                        # To be safe, we'll try to find if it's NFO or NSE based on the mapped symbol
+                        # If symbol ends with FUT or CE/PE, it's NFO. Otherwise NSE.
+                        sym = self._get_symbol(t)
+                        if "FUT" in sym or "CE" in sym or "PE" in sym:
+                            nfo_tokens.append(t)
+                        else:
+                            nse_tokens.append(t)
+                            
+                    token_list = []
+                    if nse_tokens:
+                        token_list.append({"exchangeType": 1, "tokens": nse_tokens})
+                    if nfo_tokens:
+                        token_list.append({"exchangeType": 2, "tokens": nfo_tokens})
+                        
+                    payload = {
+                        "correlationID": "tbot_ws",
+                        "action": 1,
+                        "params": {
+                            "mode": 1,
+                            "tokenList": token_list
+                        }
+                    }
+                    ws.send_request(self._provider._auth_token, payload)
+                    
+                def on_error(*args):
+                    error = args[-1] if args else "Unknown error"
+                    self._on_error(error)
+                    
+                def on_close(*args):
+                    self._on_close()
 
-            while self._running:
-                time.sleep(1)
+                ws_client.on_data = on_data
+                ws_client.on_open = on_open
+                ws_client.on_error = on_error
+                ws_client.on_close = on_close
 
-        except ImportError:
-            logger.error("[AngelOneWS] smartapi not installed. Install: pip install smartapi-python")
-        except Exception as e:
-            logger.error(f"[AngelOneWS] Connection error: {e}")
-            if self._running and self._retry_count < self.max_retries:
+                self._ws = ws_client
+
+                ws_client.connect()
+
+            except ImportError:
+                logger.error("[AngelOneWS] smartapi not installed. Install: pip install smartapi-python")
+                break
+            except Exception as e:
+                logger.error(f"[AngelOneWS] Connection error: {e}")
+            
+            # If we reach here, connect() returned (which means the socket disconnected)
+            if not self._running:
+                break
+                
+            if self._retry_count < self.max_retries:
                 self._retry_count += 1
                 delay = min(2 ** (self._retry_count - 1), 60)
                 logger.warning(f"[AngelOneWS] Reconnecting in {delay}s "
                               f"(attempt {self._retry_count}/{self.max_retries})...")
                 time.sleep(delay)
-                if self._running:
-                    self._run_websocket()
+            else:
+                logger.error("[AngelOneWS] Max retries reached. Stopping stream.")
+                self._running = False
+                break
 
     def _on_close(self):
-        logger.info("[AngelOneWS] Connection closed")
-        if self._running and self._retry_count < self.max_retries:
-            self._retry_count += 1
-            delay = min(2 ** (self._retry_count - 1), 60)
-            logger.warning(f"[AngelOneWS] Reconnecting in {delay}s "
-                          f"(attempt {self._retry_count}/{self.max_retries})...")
-            time.sleep(delay)
-            if self._running:
-                self._run_websocket()
+        logger.info("[AngelOneWS] Connection closed by server or internal logic")
 
     def _on_error(self, error):
         logger.error(f"[AngelOneWS] Error: {error}")
@@ -288,6 +339,8 @@ class AngelOneProvider(AbstractMarketProvider):
         self._smart = None
         self._feed_token = ''
         self._refresh_token = ''
+        self._auth_token = ''
+        self._session_expiry = None
 
         self._token_map: dict[str, str] = {}
         self._reverse_token_map: dict[str, str] = {}
@@ -314,64 +367,121 @@ class AngelOneProvider(AbstractMarketProvider):
 
         session_data = data.get('data', {})
         self._refresh_token = session_data.get('refreshToken', '')
+        self._auth_token = session_data.get('jwtToken', '')
         self._feed_token = self._smart.getfeedToken()
+        
+        # Token expires in a few hours, we renew after 6 hours
+        self._session_expiry = datetime.now() + timedelta(hours=6)
 
         logger.info("[AngelOne] Authenticated successfully")
         self._sync_instruments()
+        
+    def _ensure_valid_session(self):
+        """Renew the auth token if it's nearing expiry."""
+        if not self._smart or not self._session_expiry:
+            self.connect()
+            return
+            
+        if datetime.now() >= self._session_expiry:
+            logger.info("[AngelOne] Token expired, attempting renewal...")
+            try:
+                # generateToken uses the refresh token to get a new JWT
+                data = self._smart.generateToken(self._refresh_token)
+                if data.get('status'):
+                    session_data = data.get('data', {})
+                    self._auth_token = session_data.get('jwtToken', '')
+                    self._refresh_token = session_data.get('refreshToken', '')
+                    self._session_expiry = datetime.now() + timedelta(hours=6)
+                    logger.info("[AngelOne] Token renewed successfully")
+                else:
+                    logger.warning("[AngelOne] Token renewal failed, reconnecting completely...")
+                    self.connect()
+            except Exception as e:
+                logger.error(f"[AngelOne] Token renewal error: {e}, reconnecting...")
+                self.connect()
 
     def _sync_instruments(self):
+        import requests
         try:
             from app.models.db import db, IndianInstrument
+            
+            logger.info("[AngelOne] Fetching ScripMaster JSON...")
+            url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+            response = requests.get(url, timeout=15)
+            if response.status_code != 200:
+                logger.error(f"[AngelOne] Failed to fetch instruments: {response.status_code}")
+                return
+                
+            data = response.json()
+            
+            existing_tokens = {row.token for row in db.session.query(IndianInstrument.token).all()}
+            new_instruments = []
+            
+            for instr in data:
+                exchange = instr.get('exch_seg', '')
+                if exchange not in ['NSE', 'NFO']:
+                    continue
 
-            for exchange in ['NSE', 'NFO']:
-                try:
-                    instruments = self._smart.getSymbolList(exchange)
-                    if instruments and 'data' in instruments:
-                        for instr in instruments['data']:
-                            token = str(instr.get('token', ''))
-                            symbol = instr.get('symbol', '')
-                            name = instr.get('name', symbol)
-                            inst_type = instr.get('instrumenttype', '')
-                            lot_size = int(instr.get('lotsize', 1))
-                            expiry_str = instr.get('expiry', None)
-                            strike = instr.get('strike', None)
-                            tick_size = float(instr.get('tick_size', 0.05))
+                token = str(instr.get('token', ''))
+                symbol = instr.get('symbol', '')
+                
+                if not token or not symbol:
+                    continue
+                    
+                # Populate memory map
+                self._token_map[symbol.upper()] = token
+                self._reverse_token_map[token] = symbol.upper()
+                
+                if token not in existing_tokens:
+                    name = instr.get('name', symbol)
+                    inst_type = instr.get('instrumenttype', '')
+                    try:
+                        lot_size = int(instr.get('lotsize', 1) or 1)
+                    except ValueError:
+                        lot_size = 1
+                        
+                    expiry_str = instr.get('expiry', None)
+                    strike_str = instr.get('strike', None)
+                    tick_size_str = instr.get('tick_size', '0.05')
 
-                            expiry = None
-                            if expiry_str:
-                                try:
-                                    expiry = datetime.strptime(expiry_str, '%d%b%Y').date()
-                                except (ValueError, TypeError):
-                                    pass
+                    expiry = None
+                    if expiry_str:
+                        try:
+                            expiry = datetime.strptime(expiry_str, '%d%b%Y').date()
+                        except (ValueError, TypeError):
+                            pass
 
-                            existing = IndianInstrument.query.get(token)
-                            if existing:
-                                existing.symbol = symbol
-                                existing.name = name
-                                existing.last_updated = datetime.now(timezone.utc)
-                            else:
-                                db.session.add(IndianInstrument(
-                                    token=token,
-                                    symbol=symbol,
-                                    name=name,
-                                    exchange=exchange,
-                                    instrument_type=inst_type,
-                                    lot_size=lot_size,
-                                    expiry=expiry,
-                                    strike_price=float(strike) if strike else None,
-                                    tick_size=tick_size,
-                                ))
-
-                            self._token_map[symbol.upper()] = token
-                            self._reverse_token_map[token] = symbol.upper()
-
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
-                    logger.warning(f"[AngelOne] Instrument sync failed for {exchange}: {e}")
-
-            logger.info(f"[AngelOne] Instrument sync complete — "
-                        f"{len(self._token_map)} symbols mapped")
+                    strike = None
+                    if strike_str and strike_str != '-1.000000':
+                        try:
+                            strike = float(strike_str)
+                        except ValueError:
+                            pass
+                    
+                    try:
+                        tick_size = float(tick_size_str)
+                    except ValueError:
+                        tick_size = 0.05
+                        
+                    new_instruments.append(IndianInstrument(
+                        token=token,
+                        symbol=symbol,
+                        name=name,
+                        exchange=exchange,
+                        instrument_type=inst_type,
+                        lot_size=lot_size,
+                        expiry=expiry,
+                        strike_price=strike,
+                        tick_size=tick_size,
+                    ))
+                    existing_tokens.add(token) # prevent duplicates in JSON
+            
+            if new_instruments:
+                logger.info(f"[AngelOne] Bulk inserting {len(new_instruments)} new instruments into DB...")
+                db.session.bulk_save_objects(new_instruments)
+                db.session.commit()
+                
+            logger.info(f"[AngelOne] Instrument sync complete — {len(self._token_map)} symbols mapped")
 
         except Exception as e:
             logger.error(f"[AngelOne] Instrument sync error: {e}")
@@ -379,7 +489,17 @@ class AngelOneProvider(AbstractMarketProvider):
     def resolve_symbol(self, search_key: str) -> str:
         if search_key in self._reverse_token_map:
             return search_key
-        return self._token_map.get(search_key.upper(), search_key.upper())
+            
+        upper_key = search_key.upper()
+        if upper_key in self._token_map:
+            return self._token_map[upper_key]
+            
+        # Angel One equities often have a -EQ suffix (e.g., RELIANCE-EQ)
+        eq_key = f"{upper_key}-EQ"
+        if eq_key in self._token_map:
+            return self._token_map[eq_key]
+            
+        return upper_key
 
     def get_symbol_for_token(self, token: str) -> str:
         return self._reverse_token_map.get(str(token), str(token))
@@ -388,8 +508,7 @@ class AngelOneProvider(AbstractMarketProvider):
         self, symbol: str, timeframe: str,
         start_time_ms: int, end_time_ms: int,
     ) -> List[dict]:
-        if self._smart is None:
-            self.connect()
+        self._ensure_valid_session()
 
         token = self.resolve_symbol(symbol)
         if token is None:
@@ -410,47 +529,83 @@ class AngelOneProvider(AbstractMarketProvider):
         instr = IndianInstrument.query.get(token)
         exchange = 'NFO' if (instr and instr.instrument_type in ('FUTIDX', 'OPTIDX', 'FUTSTK', 'OPTSTK')) else 'NSE'
 
-        try:
-            historic_params = {
-                "exchange": exchange,
-                "symboltoken": token,
-                "interval": interval,
-                "fromdate": start_ist.strftime('%Y-%m-%d %H:%M'),
-                "todate": end_ist.strftime('%Y-%m-%d %H:%M'),
-            }
-            data = self._smart.getCandleData(historic_params)
+        # Angel One Historical API requires the "999" prefix for NSE indices (like NIFTY, BANKNIFTY)
+        # Equities also have an empty instrument_type, but their symbols end with -EQ, -BE, etc. Indices do not.
+        instr_symbol = instr.symbol if instr else symbol
+        is_index = False
+        if instr and instr.instrument_type in ('', 'AMXIDX') and not instr_symbol.endswith('-EQ') and not instr_symbol.endswith('-BE'):
+            is_index = True
+        elif symbol.upper() in ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'INDIAVIX']:
+            is_index = True
+            
+        hist_token = token
+        if exchange == 'NSE' and is_index and not hist_token.startswith('999'):
+            hist_token = f"999{token}"
 
-            if not data or 'data' not in data or not data['data']:
-                return []
+        historic_params = {
+            "exchange": exchange,
+            "symboltoken": hist_token,
+            "interval": interval,
+            "fromdate": start_ist.strftime('%Y-%m-%d %H:%M'),
+            "todate": end_ist.strftime('%Y-%m-%d %H:%M'),
+        }
 
-            all_candles = []
-            for row in data['data']:
-                ts = row[0]
-                if isinstance(ts, str):
-                    try:
-                        open_time = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%S%z')
-                    except ValueError:
-                        open_time = datetime.fromtimestamp(int(ts) / 1000, IST)
-                else:
-                    open_time = datetime.fromtimestamp(ts / 1000, IST)
+        all_candles = []
+        max_retries = 10
+        
+        for attempt in range(max_retries):
+            try:
+                data = self._smart.getCandleData(historic_params)
+                
+                if data and data.get('errorcode') == 'AB8051':
+                    logger.warning(f"[AngelOne] Rate limit exceeded, retrying in {attempt + 2}s...")
+                    time.sleep(attempt + 2)
+                    continue
+                    
+                if not data or data.get('status') is False:
+                    logger.error(f"[AngelOne] getCandleData error: {data}")
+                    break
+                    
+                if 'data' not in data or not data['data']:
+                    break
 
-                all_candles.append({
-                    "symbol": symbol.upper(),
-                    "timeframe": timeframe,
-                    "open_time": open_time,
-                    "open": float(row[1]),
-                    "high": float(row[2]),
-                    "low": float(row[3]),
-                    "close": float(row[4]),
-                    "volume": float(row[5]) if len(row) > 5 else 0,
-                    "market_type": "INDIAN",
-                })
+                for row in data['data']:
+                    ts = row[0]
+                    if isinstance(ts, str):
+                        try:
+                            open_time = datetime.strptime(ts, '%Y-%m-%dT%H:%M:%S%z')
+                        except ValueError:
+                            open_time = datetime.fromtimestamp(int(ts) / 1000, IST)
+                    else:
+                        open_time = datetime.fromtimestamp(ts / 1000, IST)
 
-            return all_candles
+                    all_candles.append({
+                        "symbol": symbol.upper(),
+                        "timeframe": timeframe,
+                        "open_time": open_time,
+                        "open": float(row[1]),
+                        "high": float(row[2]),
+                        "low": float(row[3]),
+                        "close": float(row[4]),
+                        "volume": float(row[5]) if len(row) > 5 else 0,
+                        "market_type": "INDIAN",
+                    })
+                break # Success
+            except Exception as e:
+                err_str = str(e)
+                if "exceeding access rate" in err_str or "AB8051" in err_str:
+                    logger.warning(f"[AngelOne] Rate limit exceeded for {symbol}, retrying in {attempt + 2}s...")
+                    if attempt == max_retries - 1:
+                        raise
+                    time.sleep(attempt + 2)
+                    continue
+                
+                logger.error(f"[AngelOne] fetch_candles exception for {symbol}: {e}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(2 ** attempt)
 
-        except Exception as e:
-            logger.error(f"[AngelOne] fetch_candles error for {symbol} {timeframe}: {e}")
-            raise
+        return all_candles
 
     def create_stream(
         self,
@@ -473,7 +628,7 @@ class AngelOneProvider(AbstractMarketProvider):
             on_price_update=on_price_update,
             on_live_candle=on_live_candle,
             on_reconnect=on_reconnect,
-            smart_api=self._smart,
+            provider=self,
         )
 
     def get_market_hours(self) -> dict:

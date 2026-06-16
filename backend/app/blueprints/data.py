@@ -115,11 +115,14 @@ def import_angelone():
         if isinstance(end_ts, str):
             end_ts = int(datetime.fromisoformat(end_ts.replace('Z', '+00:00')).timestamp() * 1000)
 
-        from app.providers.angelone_provider import AngelOneProvider
-        provider = AngelOneProvider()
+        from app.providers import get_provider
+        provider = get_provider('INDIAN')
+        if not provider:
+            return jsonify({"error": "Angel One provider is not configured. Please set credentials in .env"}), 500
         
         # Rate limiting protections are primarily on the frontend, but we limit to ~30 days for intraday
         candles = provider.fetch_candles(symbol, timeframe, start_ts, end_ts)
+        print("============", candles, flush=True)
 
         if not candles:
             return jsonify({"message": "No data returned from Angel One for this timeframe"}), 200

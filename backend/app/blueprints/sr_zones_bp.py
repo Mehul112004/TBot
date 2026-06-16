@@ -34,11 +34,12 @@ def get_sr_zones():
         return jsonify({'error': 'Missing required query parameter: symbol'}), 400
 
     timeframe = request.args.get('timeframe')
+    market_type = request.args.get('market_type', 'CRYPTO')
     min_strength = request.args.get('min_strength', 0.0, type=float)
     near_price = request.args.get('near_price', type=float)
 
     try:
-        query = SRZone.query.filter_by(symbol=symbol)
+        query = SRZone.query.filter_by(symbol=symbol, market_type=market_type)
 
         if timeframe:
             query = query.filter_by(timeframe=timeframe)
@@ -92,6 +93,7 @@ def refresh_zones():
     """
     body = request.get_json(silent=True) or {}
     symbol = body.get('symbol')
+    market_type = body.get('market_type', 'CRYPTO')
 
     if not symbol:
         return jsonify({'error': 'Missing required field: symbol'}), 400
@@ -109,9 +111,9 @@ def refresh_zones():
 
         for sym in symbols:
             for tf in timeframes:
-                zones = SREngine.detect_zones(sym, tf)
+                zones = SREngine.detect_zones(sym, tf, market_type=market_type)
                 if zones:
-                    SREngine.persist_zones(sym, tf, zones)
+                    SREngine.persist_zones(sym, tf, zones, market_type=market_type)
                     total_zones += len(zones)
                 results.append({
                     'symbol': sym,
@@ -148,6 +150,7 @@ def get_smc_zones():
         return jsonify({'error': 'Missing required query parameter: symbol'}), 400
 
     timeframe = request.args.get('timeframe', '1h')
+    market_type = request.args.get('market_type', 'CRYPTO')
     limit = request.args.get('limit', 200, type=int)
 
     try:
@@ -155,7 +158,7 @@ def get_smc_zones():
         from app.core.market_structure import extract_fvgs, extract_order_blocks
         from app.core.events import detect_choch, detect_liquidity_sweep
 
-        df = get_finalized_candles(symbol, timeframe, limit=limit)
+        df = get_finalized_candles(symbol, timeframe, limit=limit, market_type=market_type)
 
         if len(df) == 0:
             return jsonify({'symbol': symbol, 'timeframe': timeframe, 'zones': [], 'count': 0}), 200

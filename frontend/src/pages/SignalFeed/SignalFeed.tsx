@@ -177,7 +177,10 @@ export default function SignalFeed() {
 
   const handleQuickStart = useCallback(async () => {
     if (strategies.length === 0) return;
-    const allowedStrategies = ["Trend Following", "Burner 9/20", "EMA Cross Alert"];
+    const allowedStrategies = marketType === 'INDIAN' 
+      ? ["Indian ORB", "Indian Gap Fill", "Indian VWAP Reversal"]
+      : ["Trend Following", "Burner 9/20", "EMA Cross Alert"];
+      
     const selectedStratNames = strategies
       .map((s) => s.name)
       .filter((name) => allowedStrategies.includes(name));

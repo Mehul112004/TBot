@@ -58,6 +58,8 @@ def start_session():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception(f"Failed to start session for {symbol}")
         return jsonify({'error': f'Failed to start session: {str(e)}'}), 500
 
 

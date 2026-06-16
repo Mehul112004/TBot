@@ -335,7 +335,7 @@ class LiveScanner:
                     SREngine.minor_update(symbol, timeframe, market_type=mt)
 
                 # 3. Compute fresh indicators
-                indicator_result = IndicatorService.compute_all(symbol, timeframe, include_series=True)
+                indicator_result = IndicatorService.compute_all(symbol, timeframe, include_series=True, market_type=session.get('market_type', 'CRYPTO'))
                 if not indicator_result.get('latest'):
                     print(f"[LiveScanner]    ⚠ No indicator data for {symbol}/{timeframe}")
                     return

@@ -36,14 +36,14 @@ def _get_active_symbols(scanner):
         return []
 
 
-def full_zone_refresh_4h(app, scanner):
+def full_zone_refresh_4h(app, scanner, target_market=None):
     """
     Runs every 4 hours (aligned to 4h candle closes).
     For each active symbol × [4h]: full detection → merge → score → persist.
     Invalidates indicator cache for affected symbol/timeframe pairs.
     """
     with app.app_context():
-        active = _get_active_symbols(scanner)
+        active = [s for s in _get_active_symbols(scanner) if target_market is None or s[1] == target_market]
         if not active:
             print("[Scheduler] No active sessions — skipping 4h full refresh.")
             return
@@ -58,13 +58,13 @@ def full_zone_refresh_4h(app, scanner):
         print("[Scheduler] 4h full zone refresh complete.")
 
 
-def full_zone_refresh_1d(app, scanner):
+def full_zone_refresh_1d(app, scanner, target_market=None):
     """
-    Runs once per day at 00:02 UTC (after daily candle close).
+    Runs once per day after daily candle close.
     For each active symbol × [1D]: full detection → merge → score → persist.
     """
     with app.app_context():
-        active = _get_active_symbols(scanner)
+        active = [s for s in _get_active_symbols(scanner) if target_market is None or s[1] == target_market]
         if not active:
             print("[Scheduler] No active sessions — skipping 1D full refresh.")
             return
@@ -79,14 +79,14 @@ def full_zone_refresh_1d(app, scanner):
         print("[Scheduler] 1D full zone refresh complete.")
 
 
-def minor_zone_update(app, scanner):
+def minor_zone_update(app, scanner, target_market=None):
     """
-    Runs every 1 hour at :03.
+    Runs every 1 hour (candle closes).
     For each active symbol × [1h, 15m]: swing point detection on latest window.
     Adds new swing points to DB without full recalculation.
     """
     with app.app_context():
-        active = _get_active_symbols(scanner)
+        active = [s for s in _get_active_symbols(scanner) if target_market is None or s[1] == target_market]
         if not active:
             print("[Scheduler] No active sessions — skipping minor update.")
             return
@@ -145,41 +145,84 @@ def init_scheduler(app, scanner):
         replace_existing=True,
     )
 
-    # --- 4h zones: every 4h at :01 (FIX-SCH-2/5) ---
+    # --- CRYPTO ---
+    # 4h zones: every 4h at :01
     scheduler.add_job(
         func=full_zone_refresh_4h,
-        args=[app, scanner],
+        args=[app, scanner, 'CRYPTO'],
         trigger='cron',
         hour='0,4,8,12,16,20',
         minute=1,
-        id='full_zone_refresh_4h',
+        id='full_zone_refresh_4h_crypto',
         replace_existing=True,
         coalesce=True,
         max_instances=1,
         misfire_grace_time=120,
     )
 
-    # --- 1D zones: only at daily close 00:02 UTC (FIX-SCH-2/5) ---
+    # 1D zones: only at daily close 00:02 UTC
     scheduler.add_job(
         func=full_zone_refresh_1d,
-        args=[app, scanner],
+        args=[app, scanner, 'CRYPTO'],
         trigger='cron',
         hour=0,
         minute=2,
-        id='full_zone_refresh_1d',
+        id='full_zone_refresh_1d_crypto',
         replace_existing=True,
         coalesce=True,
         max_instances=1,
         misfire_grace_time=180,
     )
 
-    # --- Minor update (1h/15m): every hour at :03 (FIX-SCH-2/5) ---
+    # Minor update (1h/15m): every hour at :03
     scheduler.add_job(
         func=minor_zone_update,
-        args=[app, scanner],
+        args=[app, scanner, 'CRYPTO'],
         trigger='cron',
         minute=3,
-        id='minor_zone_update',
+        id='minor_zone_update_crypto',
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=60,
+    )
+
+    # --- INDIAN ---
+    # 4h zones: 06:01 UTC and 10:01 UTC
+    scheduler.add_job(
+        func=full_zone_refresh_4h,
+        args=[app, scanner, 'INDIAN'],
+        trigger='cron',
+        hour='6,10',
+        minute=1,
+        id='full_zone_refresh_4h_indian',
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=120,
+    )
+
+    # 1D zones: Indian daily close 10:02 UTC
+    scheduler.add_job(
+        func=full_zone_refresh_1d,
+        args=[app, scanner, 'INDIAN'],
+        trigger='cron',
+        hour=10,
+        minute=2,
+        id='full_zone_refresh_1d_indian',
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=180,
+    )
+
+    # Minor update (1h/15m): Indian hourly close is usually :15 IST (:45 UTC) -> refresh at :47 UTC
+    scheduler.add_job(
+        func=minor_zone_update,
+        args=[app, scanner, 'INDIAN'],
+        trigger='cron',
+        minute=47,
+        id='minor_zone_update_indian',
         replace_existing=True,
         coalesce=True,
         max_instances=1,

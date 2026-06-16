@@ -155,7 +155,8 @@ def create_app(test_config=None):
             if os.environ.get('ANGELONE_API_KEY'):
                 from app.providers.angelone_provider import AngelOneProvider
                 from app.providers import register_provider
-                angelone = AngelOneProvider()
+                with app.app_context():
+                    angelone = AngelOneProvider()
                 register_provider('INDIAN', angelone)
                 print("[create_app] AngelOneProvider registered for INDIAN market")
         except Exception as e:

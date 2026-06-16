@@ -113,6 +113,12 @@ def get_finalized_candles(
         last_candle_time_ms = df['open_time_ms'].iloc[-1]
         age_ms = now_ms - last_candle_time_ms
         max_age_ms = tf_ms * 2
+        
+        # Indian market has weekends and non-24/7 hours. We bypass the strict 2-candle staleness check.
+        # Alternatively, we could set max_age_ms to 3-4 days (e.g. 80 hours) to account for long weekends.
+        if market_type == 'INDIAN':
+            max_age_ms = 80 * 60 * 60 * 1000  # 80 hours in ms
+            
         if age_ms > max_age_ms:
             raise StaleDataError(
                 f"Most recent closed candle for {symbol} {timeframe} is "

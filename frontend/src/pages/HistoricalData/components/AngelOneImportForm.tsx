@@ -27,8 +27,8 @@ export default function AngelOneImportForm({ onSuccess }: { onSuccess: () => voi
         throw new Error("End date must be after start date.");
       }
       
-      if (timeframe !== '1d' && diffDays > 30) {
-        throw new Error("Cannot fetch more than 30 days of intraday data at once to respect rate limits.");
+      if (timeframe !== '1d' && diffDays > 180) {
+        throw new Error("Cannot fetch more than 180 days of intraday data at once to respect rate limits.");
       }
       if (timeframe === '1d' && diffDays > 365 * 2) {
         throw new Error("Cannot fetch more than 2 years of daily data at once.");
