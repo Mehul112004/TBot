@@ -640,9 +640,9 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
       for (const rn of roundNumbers) {
         const line = series.createPriceLine({
           price: rn.price_level,
-          color: "rgba(148, 163, 184, 0.35)", // slate-400, faint
+          color: "rgba(245, 158, 11, 0.55)", // amber-500, subtle but readable
           lineWidth: 1,
-          lineStyle: 1, // dotted
+          lineStyle: 2, // dashed
           axisLabelVisible: false,
           title: "",
           lineVisible: true,
@@ -898,10 +898,12 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
           id="ohlcv-legend"
         />
 
-        {/* Candle countdown timer & Regime */}
+        {/* Top-right overlay stack: countdown + regime + counts + EMA legend.
+            All badges live in ONE flex-col container so the browser stacks
+            them automatically — no manual `top:` offsets, no overlaps. */}
         <div
-          className="top-3 right-4 z-20 absolute flex flex-col items-end gap-2 pointer-events-none"
-          id="candle-info-stack"
+          className="top-3 right-4 z-20 absolute flex flex-col items-end gap-1.5 pointer-events-none"
+          id="chart-overlay-stack"
         >
           {countdown && (
             <div
@@ -960,33 +962,17 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
               {currentRegime.replace("_", " ")}
             </div>
           )}
-        </div>
 
-        {/* SMC zone badge */}
-        {showSMCZones && smcZones.length > 0 && (
-          <div
-            className="z-10 absolute pointer-events-none"
-            style={{
-              top: countdown ? "2.5rem" : "0.75rem",
-              right: showSRZones && srZones.length > 0 ? "8rem" : "1rem",
-            }}
-          >
-            <span className="bg-slate-800/80 px-2 py-1 border border-cyan-500/30 rounded text-[10px] text-cyan-400">
+          {/* SMC zone count */}
+          {showSMCZones && smcZones.length > 0 && (
+            <span className="bg-slate-800/80 px-2 py-1 border border-cyan-500/30 rounded text-[10px] text-cyan-400 backdrop-blur">
               {smcZones.length} SMC zone{smcZones.length !== 1 ? "s" : ""}
             </span>
-          </div>
-        )}
+          )}
 
-        {/* Overlay info badges — shifted down when countdown visible */}
-        {(showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0) ? (
-          <div
-            className="z-10 absolute pointer-events-none"
-            style={{
-              top: countdown ? "2.5rem" : "0.75rem",
-              right: "1rem",
-            }}
-          >
-            <span className="bg-slate-800/80 px-2 py-1 border border-slate-600/40 rounded text-[10px] text-slate-400">
+          {/* Count badge: SR · Pivots · Psych — single compact pill */}
+          {((showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0)) && (
+            <span className="bg-slate-800/80 px-2 py-1 border border-slate-600/40 rounded text-[10px] text-slate-400 backdrop-blur">
               {[
                 showSRZones && srZones.length > 0
                   ? `${srZones.length} S/R`
@@ -1001,37 +987,25 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
                 .filter(Boolean)
                 .join(" · ")}
             </span>
-          </div>
-        ) : null}
+          )}
 
-        {/* EMA legend */}
-        {showEMA && (
-          <div
-            className="z-10 absolute flex gap-2 pointer-events-none"
-            style={{
-              top: countdown
-                ? (showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0)
-                  ? "4rem"
-                  : "2.5rem"
-                : (showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0)
-                  ? "2.5rem"
-                  : "0.75rem",
-              right: "1rem",
-            }}
-          >
-            {Object.entries(EMA_COLORS).map(([key, color]) =>
-              emaVisible[key] ? (
-                <span
-                  key={key}
-                  className="font-bold text-[10px]"
-                  style={{ color }}
-                >
-                  {key.replace("ema_", "EMA ")}
-                </span>
-              ) : null,
-            )}
-          </div>
-        )}
+          {/* EMA legend — single row, right-aligned */}
+          {showEMA && (
+            <div className="flex gap-2 bg-slate-800/70 px-2 py-1 border border-slate-600/30 rounded backdrop-blur">
+              {Object.entries(EMA_COLORS).map(([key, color]) =>
+                emaVisible[key] ? (
+                  <span
+                    key={key}
+                    className="font-bold text-[10px]"
+                    style={{ color }}
+                  >
+                    {key.replace("ema_", "EMA ")}
+                  </span>
+                ) : null,
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Chart container — ALWAYS rendered so containerRef is never null */}
         <div
