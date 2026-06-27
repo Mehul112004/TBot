@@ -1,15 +1,19 @@
 """
 S/R Zone Detection Engine
 Detects Support/Resistance zones from candle data using multiple methods:
-- Swing high/low detection (configurable lookback)
-- Round psychological numbers
-- Previous day/week highs and lows
-- Zone merging and strength scoring
+- Swing high/low detection (configurable lookback, default 12 = structural)
+- Round psychological numbers (large grain only by default — sparse)
+- Zone merging (0.75 × ATR threshold), strength scoring (post-formation
+  touches, touch-gated, recency-decayed) and DB persistence.
+
+Previous day/week H/L is no longer emitted here — that role is filled by the
+richer Pivot Points layer (see app.core.pivot_engine).
 """
 
 import threading
 import pandas as pd
 import numpy as np
+import math
 from datetime import datetime, timedelta
 from app.models.db import db, Candle, SRZone
 from app.core.indicator_service import IndicatorService
@@ -35,16 +39,59 @@ TIMEFRAME_WEIGHTS = {
     '1m':  0.03,
 }
 
-# Round number increments per symbol for psychological levels
+# Round number increments per symbol for psychological levels.
+# Only the core supported symbols are listed here — any other symbol falls
+# through to the dynamic get_round_grains() helper which derives sensible
+# grains from the current price (~1% small, ~5% large), so unknown assets
+# still render psychological levels on the chart.
 ROUND_NUMBER_CONFIG = {
-    'BTCUSDT': {'small': 1000, 'large': 5000},
-    'ETHUSDT': {'small': 100, 'large': 500},
-    'SOLUSDT': {'small': 10, 'large': 50},
-    'XRPUSDT': {'small': 0.10, 'large': 0.50},
+    'BTCUSDT':  {'small': 1000, 'large': 5000},
+    'ETHUSDT':  {'small': 100,  'large': 500},
+    'SOLUSDT':  {'small': 10,   'large': 50},
 }
 
-# Default for unknown symbols
-DEFAULT_ROUND_CONFIG = {'small': 100, 'large': 500}
+
+def _auto_grain(price: float, pct: float) -> float:
+    """
+    Snap ``price * pct`` to the nearest "nice" increment (1, 2, 5 × 10^k).
+    Used as the fallback when a symbol isn't in ROUND_NUMBER_CONFIG so any
+    unknown asset still gets sensible psychological levels instead of a fixed
+    grain that may be larger than its price (e.g. $500 grain for a $200 coin).
+
+    Examples:
+        _auto_grain(204,    0.05) → 10      (BCH large)
+        _auto_grain(204,    0.01) → 2       (BCH small)
+        _auto_grain(67000,  0.05) → 5000    (BTC large, matches config)
+    """
+    if price <= 0:
+        return 1.0
+    target = max(price * pct, 1e-9)
+    # Magnitude is the power of 10 spanning the target (works for sub-1 prices
+    # too, e.g. $0.65 → magnitude 0.01).
+    magnitude = 10 ** math.floor(math.log10(target))
+    normalized = target / magnitude
+    if normalized < 1.5:
+        nice = 1
+    elif normalized < 3.5:
+        nice = 2
+    else:
+        nice = 5
+    return nice * magnitude
+
+
+def get_round_grains(symbol: str, current_price: float) -> dict:
+    """
+    Return {'small':..., 'large':...} round-number grains for a symbol.
+    Uses ROUND_NUMBER_CONFIG when available; otherwise derives grains from the
+    current price (~1% small, ~5% large) so unknown symbols still render.
+    """
+    cfg = ROUND_NUMBER_CONFIG.get(symbol)
+    if cfg:
+        return cfg
+    return {
+        'small': _auto_grain(current_price, 0.01),
+        'large': _auto_grain(current_price, 0.05),
+    }
 
 
 class SREngine:
@@ -117,6 +164,7 @@ class SREngine:
         current_price: float,
         range_pct: float = 0.15,
         price_range: tuple[float, float] | None = None,
+        grain: str = 'large',
     ) -> list[dict]:
         """
         Generate zones at psychologically significant round numbers near current price.
@@ -128,11 +176,13 @@ class SREngine:
             price_range: Optional (min_price, max_price) to override range_pct.
                          Used by backtests to cover the full historical price range
                          without anchoring to the last bar's price.
+            grain: Which round-number increments to emit — 'large' (default, sparse,
+                   recommended for chart clarity), 'small' (dense), or 'both'.
 
         Returns:
             List of zone dicts for round number levels
         """
-        config = ROUND_NUMBER_CONFIG.get(symbol, DEFAULT_ROUND_CONFIG)
+        config = get_round_grains(symbol, current_price)
         zones = []
 
         if price_range is not None:
@@ -142,7 +192,8 @@ class SREngine:
             price_lower = current_price * (1 - range_pct)
             price_upper = current_price * (1 + range_pct)
 
-        for increment_key in ['small', 'large']:
+        increment_keys = ['small', 'large'] if grain == 'both' else [grain]
+        for increment_key in increment_keys:
             increment = config[increment_key]
 
             # Start from the nearest round number at or below price_lower
@@ -295,7 +346,9 @@ class SREngine:
     @staticmethod
     def merge_zones(zones: list[dict], atr: float) -> list[dict]:
         """
-        Merge overlapping zones that are within 0.5 × ATR of each other.
+        Merge overlapping zones that are within 0.75 × ATR of each other.
+        A wider threshold than the historical 0.5×ATR collapses more near-equal
+        levels into single bands — essential for a de-cluttered chart.
         Iterates until output stabilises to catch cascading overlaps (FIX-SR-6).
 
         Args:
@@ -308,7 +361,7 @@ class SREngine:
         if not zones or atr <= 0:
             return zones
 
-        merge_threshold = 0.5 * atr
+        merge_threshold = 0.75 * atr
 
         def _single_pass(zs: list[dict]) -> list[dict]:
             sorted_zs = sorted(zs, key=lambda z: z['price_level'])
@@ -348,18 +401,31 @@ class SREngine:
         """
         Assign a strength score to a zone based on historical touches and timeframe weight.
 
-        Strength = min(1.0, (touch_count × 0.15) + timeframe_weight)
+        Touch semantics (FIX-SR-LOOK): a touch = any candle *after* the zone
+        formed whose high/low range intersects the zone band. Counting only
+        post-formation touches is both semantically correct (a zone can only be
+        "tested" once it exists) and consistent across the DB and DataFrame
+        detection paths. The previous DB path counted all candles and the DF
+        path counted pre-formation candles — an inconsistency that inflated
+        strengths and bloated the chart.
 
-        A touch = any candle whose high or low falls within the zone band.
+        Strength formula (touch-gated + recency-decayed):
+            if touches < 2:  strength = 0          (a single touch is not S/R)
+            else:            base = min(1.0, (touches-1)*0.12 + tf_weight*0.5)
+                              strength = base * exp(-age / 150)
+            where age = bars since the zone was last tested.
 
         Args:
             zone: Zone dict with price_level, zone_upper, zone_lower
             df: DataFrame of candles for touch counting
             timeframe: Origin timeframe of this zone
-            formation_idx: Index of the candle that formed this zone (excluded from touch count)
-            max_bar: If set, only count touches in df[0:max_bar] to prevent
-                     lookahead bias in backtests. Touches after this bar are
-                     invisible at the time the zone was formed.
+            formation_idx: Index of the candle that formed this zone. Touches
+                           are counted from formation_idx+1 onward. None for
+                           zones that exist from the earliest data (round
+                           numbers / prev-period levels).
+            max_bar: If set, only count touches in df[formation_idx+1 : max_bar].
+                     Defaults to None (= end of df). Backtests can pass their
+                     current bar to avoid lookahead.
 
         Returns:
             Updated zone dict with strength_score and touch_count
@@ -367,26 +433,52 @@ class SREngine:
         upper = zone.get('zone_upper', zone['price_level'])
         lower = zone.get('zone_lower', zone['price_level'])
 
-        scoring_df = df.iloc[:max_bar] if max_bar is not None else df
-        touch_mask = (scoring_df['high'] >= lower) & (scoring_df['low'] <= upper)
+        end = max_bar if max_bar is not None else len(df)
+        last_bar_index = end - 1
 
-        # Exclude the candle that formed this zone (FIX-SR-4)
-        if formation_idx is not None and formation_idx < len(scoring_df):
-            touch_mask.iloc[formation_idx] = False
+        # Touch window: bars AFTER formation (a zone can only be tested once
+        # it exists). Round numbers / prev-period levels (formation_idx None)
+        # exist from the earliest data, so count from the start.
+        start = formation_idx + 1 if formation_idx is not None else 0
+        if start < 0:
+            start = 0
 
-        touch_count = int(touch_mask.sum())
+        scoring_df = df.iloc[start:end]
+        if len(scoring_df) == 0:
+            touch_count = 0
+            last_tested = None
+            last_tested_idx = None
+        else:
+            touch_mask = (scoring_df['high'] >= lower) & (scoring_df['low'] <= upper)
+            touch_count = int(touch_mask.sum())
+
+            last_tested = None
+            last_tested_idx = None
+            if touch_mask.any():
+                # Position within the full df (offset by start)
+                last_tested_idx = int(np.where(touch_mask.values)[0][-1]) + start
+                last_tested = scoring_df.loc[touch_mask, 'open_time'].iloc[-1]
+                if isinstance(last_tested, pd.Timestamp):
+                    last_tested = last_tested.to_pydatetime()
+                if hasattr(last_tested, 'tzinfo') and last_tested.tzinfo is not None:
+                    last_tested = last_tested.replace(tzinfo=None)
 
         tf_weight = TIMEFRAME_WEIGHTS.get(timeframe, 0.10)
-        strength = min(1.0, (touch_count * 0.15) + tf_weight)
 
-        # Find the most recent touch
-        last_tested = None
-        if touch_mask.any():
-            last_tested = scoring_df.loc[touch_mask, 'open_time'].iloc[-1]
-            if isinstance(last_tested, pd.Timestamp):
-                last_tested = last_tested.to_pydatetime()
-            if hasattr(last_tested, 'tzinfo') and last_tested.tzinfo is not None:
-                last_tested = last_tested.replace(tzinfo=None)
+        # Touch-gated strength: zones with <2 touches are not real S/R.
+        MIN_TOUCHES_SCORE = 2
+        if touch_count < MIN_TOUCHES_SCORE:
+            strength = 0.0
+        else:
+            base = min(1.0, (touch_count - 1) * 0.12 + tf_weight * 0.5)
+            # Recency decay: zones untested for a long time weaken.
+            if last_tested_idx is not None:
+                age = max(0, last_bar_index - last_tested_idx)
+            elif formation_idx is not None:
+                age = max(0, last_bar_index - formation_idx)
+            else:
+                age = 0
+            strength = base * float(np.exp(-age / 150.0))
 
         zone['strength_score'] = round(strength, 4)
         zone['touch_count'] = touch_count
@@ -397,19 +489,25 @@ class SREngine:
     # ---------- Full Zone Detection Pipeline ----------
 
     @classmethod
-    def detect_zones(cls, symbol: str, timeframe: str, swing_lookback: int = 5) -> list[dict]:
+    def detect_zones(cls, symbol: str, timeframe: str, swing_lookback: int = 12) -> list[dict]:
         """
         Full S/R zone detection pipeline for a symbol/timeframe:
         1. Fetch candles from DB
-        2. Run all detection methods
+        2. Run detection methods (swings + round numbers)
         3. Calculate zone widths using ATR
         4. Merge nearby zones
         5. Score zones for strength
+        6. Drop zones with fewer than 2 touches (not real S/R)
+
+        Previous day/week H/L is no longer emitted here — it is subsumed by
+        the richer Pivot Points layer (see pivot_engine). Round numbers use the
+        sparse 'large' grain only to avoid chart clutter.
 
         Args:
             symbol: Trading pair
             timeframe: Candle timeframe
-            swing_lookback: Lookback period for swing detection
+            swing_lookback: Lookback period for swing detection (default 12 —
+                            a wider window flags structural pivots, not micro-noise)
 
         Returns:
             List of fully processed zone dicts ready for DB insertion
@@ -449,13 +547,11 @@ class SREngine:
         swing_zones = cls.detect_swing_points(df, lookback=swing_lookback)
         all_zones.extend(swing_zones)
 
-        # 2. Round psychological numbers
-        round_zones = cls.detect_round_numbers(symbol, current_price)
+        # 2. Round psychological numbers (sparse large grain only)
+        round_zones = cls.detect_round_numbers(symbol, current_price, grain='large')
         all_zones.extend(round_zones)
 
-        # 3. Previous day/week H/L
-        period_zones = cls.detect_prev_period_hl(symbol)
-        all_zones.extend(period_zones)
+        # Previous day/week H/L is handled by the Pivot Points layer now.
 
         if not all_zones:
             return []
@@ -485,17 +581,26 @@ class SREngine:
             zone['symbol'] = symbol
             zone['timeframe'] = timeframe
 
+        # Drop zones that are not real S/R (< 2 post-formation touches).
+        # These never reach the chart and keep the DB lean.
+        merged_zones = [z for z in merged_zones if z.get('touch_count', 0) >= 2]
+
         return merged_zones
 
     @classmethod
     def detect_zones_df(cls, df: pd.DataFrame, symbol: str,
-                        timeframe: str, swing_lookback: int = 5) -> pd.DataFrame:
+                        timeframe: str, swing_lookback: int = 12,
+                        max_bar: int = None) -> pd.DataFrame:
         """
         Run the full S/R detection pipeline on a DataFrame and append zone columns.
 
         S/R zones do NOT use the masked ffill + mitigation kill-switch pattern
         (unlike FVGs/OBs). S/R zones persist — a broken resistance flips to
         support, not to NaN.
+
+        Touch counting uses post-formation bars up to `max_bar` (or end of df)
+        — consistent with detect_zones() and free of lookahead when a backtest
+        passes its current bar as max_bar.
 
         Appends columns:
             sr_active:        bool — True where zones exist (all rows after detection)
@@ -510,7 +615,10 @@ class SREngine:
             df: DataFrame with [open_time, open, high, low, close]
             symbol: Trading pair
             timeframe: Candle timeframe
-            swing_lookback: Lookback for swing detection
+            swing_lookback: Lookback for swing detection (default 12)
+            max_bar: Upper bound (exclusive) for touch scoring. Defaults to None
+                     (= end of df, live snapshot). Backtests pass their current
+                     bar index to avoid lookahead.
 
         Returns:
             DataFrame with sr_* columns appended
@@ -545,16 +653,16 @@ class SREngine:
         all_zones.extend(swing_zones)
 
         # Use full price range for round numbers to avoid anchoring
-        # to a single price point (prevents lookahead in backtests)
+        # to a single price point (prevents lookahead in backtests).
+        # Sparse large grain only to avoid chart clutter.
         price_min = float(df['close'].min())
         price_max = float(df['close'].max())
         round_zones = cls.detect_round_numbers(
-            symbol, current_price, price_range=(price_min, price_max),
+            symbol, current_price, price_range=(price_min, price_max), grain='large',
         )
         all_zones.extend(round_zones)
 
-        period_zones = cls.detect_prev_period_hl(symbol)
-        all_zones.extend(period_zones)
+        # Previous day/week H/L is handled by the Pivot Points layer now.
 
         if not all_zones:
             return df
@@ -580,11 +688,12 @@ class SREngine:
             zone['zone_upper'] = upper
             zone['zone_lower'] = lower
             form_idx = zone.pop('_formation_idx', None)
-            # Score using only data up to the formation bar to prevent
-            # lookahead bias (future touches must not inflate strength)
+            # Score using post-formation touches up to max_bar (or end of df).
+            # Consistent with detect_zones(); no lookahead when a backtest
+            # bounds max_bar to its current simulation bar.
             cls.score_zone(zone, df, timeframe,
                            formation_idx=form_idx,
-                           max_bar=form_idx)
+                           max_bar=max_bar)
             # Restore the formation index for temporal masking
             saved_idx = zone_form_idx.get(i)
             if saved_idx is not None:
@@ -621,7 +730,8 @@ class SREngine:
     # ---------- Database Persistence ----------
 
     @classmethod
-    def persist_zones(cls, symbol: str, timeframe: str, zones: list[dict]):
+    def persist_zones(cls, symbol: str, timeframe: str, zones: list[dict],
+                      prune_stale: bool = False):
         """
         Persist detected zones to the database.
         Uses upsert logic: update existing zones, insert new ones.
@@ -631,11 +741,40 @@ class SREngine:
             symbol: Trading pair
             timeframe: Candle timeframe
             zones: List of zone dicts from detect_zones()
+            prune_stale: If True (used by full_refresh), wipe ALL existing rows
+                         for this symbol/timeframe before persisting, so every
+                         row in the table reflects the CURRENT scoring — no
+                         leftovers from older scoring regimes survive. minor_update
+                         keeps this False so it never wipes incremental state.
         """
-        if not zones:
+        # If there are no zones AND we are not pruning, there's nothing to do.
+        # An empty `zones` with prune_stale=True still triggers the wipe below
+        # (and inserts nothing) — leaving the table clean for that symbol/tf,
+        # which is the correct full_refresh-empty result.
+        if not zones and not prune_stale:
             return
 
+        # Defensive: never persist zones that are not real S/R (< 2 touches).
+        # detect_zones / minor_update already filter, but guard here too so any
+        # future caller cannot re-bloat the table.
+        zones = [z for z in zones if z.get('touch_count', 0) >= 2]
+
         try:
+            # Full-wipe stale-row cleanup. On full_refresh the new detection
+            # window (lookback=12) often won't re-flag a former swing point, so
+            # that row's upsert would never fire and its old strength/score would
+            # stay frozen at the previous regime's value. Wiping ALL existing
+            # rows for this symbol/tf and persisting only the freshly-detected set
+            # guarantees every row reflects CURRENT scoring.
+            if prune_stale:
+                SRZone.query.filter(
+                    SRZone.symbol == symbol,
+                    SRZone.timeframe == timeframe,
+                ).delete(synchronize_session=False)
+                db.session.commit()
+
+            if not zones:
+                return
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
             for zone in zones:
@@ -700,8 +839,11 @@ class SREngine:
         with cls.get_refresh_lock(symbol):
             zones = cls.detect_zones(symbol, timeframe)
             if zones:
-                cls.persist_zones(symbol, timeframe, zones)
+                cls.persist_zones(symbol, timeframe, zones, prune_stale=True)
             else:
+                # Nothing detected, but still clean up stale rows so a fresh
+                # full refresh leaves the table tidy.
+                cls.persist_zones(symbol, timeframe, [], prune_stale=True)
                 print(f"[SREngine] No zones detected for {symbol}/{timeframe}")
 
     @classmethod
@@ -731,7 +873,7 @@ class SREngine:
             df = df.sort_values('open_time').reset_index(drop=True)
 
             # Detect new swing points
-            swing_zones = cls.detect_swing_points(df, lookback=5)
+            swing_zones = cls.detect_swing_points(df, lookback=12)
 
             if not swing_zones:
                 return
@@ -752,6 +894,11 @@ class SREngine:
                 zone['timeframe'] = timeframe
                 cls.score_zone(zone, df, timeframe,
                                formation_idx=zone.pop('_formation_idx', None))
+
+            # Only persist zones that are real S/R (>= 2 post-formation touches)
+            swing_zones = [z for z in swing_zones if z.get('touch_count', 0) >= 2]
+            if not swing_zones:
+                return
 
             cls.persist_zones(symbol, timeframe, swing_zones)
 

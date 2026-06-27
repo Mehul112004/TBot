@@ -225,34 +225,58 @@ The `StrategyRegistry` scans `app/strategies/` at startup, imports all `.py` fil
 
 ---
 
-## 8. Support/Resistance Zones
+## 8. Support/Resistance Zones & Pivot Points
 
-### Detection Methods
+The chart overlays **four independent horizontal-level layers**, each toggleable:
+
+| Layer | Source | Style | Toggle |
+|---|---|---|---|
+| **S/R Zones** | `sr_engine.py` — swing detection + round numbers | Filled **bands** (rectangles) | Green |
+| **Pivot Points** | `pivot_engine.py` — Camarilla/Standard from prev day's H/L/C | Thin **lines** | Purple |
+| **Psych Levels** | `sr_engine.detect_round_numbers` (large grain) | Faint dotted lines | Amber (off by default) |
+| **SMC Zones** | `market_structure.py` — FVG/OB/CHoCH/BoS | Lines + markers | Cyan |
+
+> See [docs/logic/sr_engine.md](../logic/sr_engine.md), [docs/logic/pivot_points.md](../logic/pivot_points.md), and [docs/knowledge_base/sr_zones_and_pivots.md](./sr_zones_and_pivots.md) for full details.
+
+### S/R Zone Detection (v2.0 — de-bloated)
 
 | Method | Algorithm |
 |---|---|
-| **Swing Points** | ±5 candle lookback local maxima/minima |
-| **Round Numbers** | Psychological levels: BTC $1000/$5000 steps, ETH $100/$500, SOL $10/$50, XRP $0.10/$0.50 |
-| **Previous Day High/Low** | Previous 24h candle extremes |
-| **Previous Week High/Low** | Previous ISO calendar week extremes |
+| **Swing Points** | ±12 candle lookback local maxima/minima (structural pivots, not micro-noise) |
+| **Round Numbers** | Psychological levels — large grain only (BTC $5000, ETH $500, SOL $50; dynamic for unknown symbols) |
+| ~~**Previous Day/Week H/L**~~ | Removed — subsumed by the richer Pivot Points layer |
 
 ### Zone Processing
 
 1. **Width** = price_level ± (0.25 × ATR)
-2. **Merge** overlapping zones within 0.5 × ATR (iterate until stable)
-3. **Score** = min(1.0, touch_count × 0.15 + timeframe_weight)
-4. **Temporal Masking**: when attached to a DataFrame, zones only appear after their formation candle (prevents lookahead bias)
-5. **Persist** to `sr_zones` table via upsert
+2. **Merge** overlapping zones within **0.75 × ATR** (iterate until stable)
+3. **Score** = touch-gated + recency-decayed:
+   - `<2 touches` → score 0 (a single touch is not S/R)
+   - `base = min(1.0, (touches − 1) × 0.12 + tf_weight × 0.5)`
+   - `strength = base × exp(−age / 150)` (halflife ~104 bars)
+4. **Temporal Masking**: zones only appear after their formation candle (prevents lookahead bias)
+5. **Persist** to `sr_zones` table via upsert (full refresh wipes stale rows first)
+6. **Filter**: zones with `<2 touches` are never persisted or charted
+
+### Multi-Timeframe (MTF) Stacking
+
+The chart shows the viewed timeframe's zones **plus 2 higher timeframes** up the ladder `[15m, 1h, 4h, 1d, 1w]`. Example: viewing `1h` shows `1h + 4h + 1d` zones. **Confluence** is flagged when a viewed-TF band overlaps an HTF band (marked with `*` on the chart).
+
+### Pivot Points
+
+Computed on-the-fly (not persisted) from the **previous completed** UTC day's 1D candle. **Camarilla** is the default variant (H3/L3 = reversal zones, H4/L4 = breakout levels, P = bias line). See [pivot_points.md](../logic/pivot_points.md) for formulas and label meanings.
 
 ### Refresh Schedule
 
-| Trigger | Scope |
-|---|---|
-| APScheduler cron: 4h at :01 UTC | Full refresh (all methods) |
-| APScheduler cron: 1h at :03 UTC | Minor update (swing points only) |
-| 4h/1d candle close | Full refresh |
-| 1h/15m candle close | Minor update |
-| Session start (no existing zones) | Full refresh |
+| Trigger | Scope | Prune? |
+|---|---|---|
+| APScheduler: 4h at :01 UTC | `4h` full refresh | Yes |
+| APScheduler: daily at :02 UTC | `1d` full refresh | Yes |
+| APScheduler: hourly at :03 UTC | `1h`, `15m` minor update (swing only) | No |
+| Startup (on boot) | All supported TFs full refresh | Yes |
+| 4h/1d candle close | Full refresh | Yes |
+| 1h/15m candle close | Minor update | No |
+| Session start (no zones) | Full refresh | Yes |
 
 ---
 

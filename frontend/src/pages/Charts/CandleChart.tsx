@@ -13,6 +13,10 @@ import {
   LineSeries,
   type IChartApi,
   type ISeriesApi,
+  type ISeriesPrimitive,
+  type IPrimitivePaneView,
+  type IPrimitivePaneRenderer,
+  type SeriesAttachedParameter,
   ColorType,
   type CandlestickData,
   type UTCTimestamp,
@@ -27,6 +31,8 @@ import type {
   SRZone,
   SMCZone,
   IndicatorSeriesPoint,
+  PivotLevel,
+  RoundNumber,
 } from "../../api/client";
 import type { LiveCandleEvent } from "../../types/signals";
 
@@ -53,6 +59,13 @@ const EMA_COLORS: Record<string, string> = {
   ema_200: "#ef4444",
 };
 
+/* Pivot line colours: pivot=neutral, resistance=red, support=green */
+const PIVOT_COLORS: Record<string, string> = {
+  pivot: "#eab308", // yellow
+  resistance: "#ef4444",
+  support: "#10b981",
+};
+
 /* ─── helpers ─── */
 function toUTC(iso: string): UTCTimestamp {
   return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
@@ -60,6 +73,115 @@ function toUTC(iso: string): UTCTimestamp {
 
 function msToUTC(ms: number): UTCTimestamp {
   return Math.floor(ms / 1000) as UTCTimestamp;
+}
+
+/**
+ * Convert a hex colour "#rrggbb" to an rgba() string with the given alpha.
+ */
+function withAlpha(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SR Band Primitive
+   Draws a filled horizontal band (rectangle) between zone_lower and zone_upper
+   for every S/R zone, spanning the full chart width. This replaces the old
+   approach of three price-lines per zone (center + upper + lower) which
+   cluttered the chart. Each band's fill opacity encodes its strength score;
+   confluence / HTF zones get a brighter border.
+   ───────────────────────────────────────────────────────────────────────── */
+
+interface SRBand {
+  upper: number;
+  lower: number;
+  color: string;        // base hex colour (by zone_type)
+  fillAlpha: number;    // 0..1, derived from strength
+  borderWidth: number;  // 1 (viewed TF) or 2 (HTF)
+  borderColor: string;  // rgba string
+}
+
+/* Minimal structural types for the fancy-canvas draw target (not exported by
+   lightweight-charts, so we declare just what we use). */
+interface BitmapCoordinatesRenderingScope {
+  readonly context: CanvasRenderingContext2D;
+  readonly bitmapSize: { width: number; height: number };
+  readonly horizontalPixelRatio: number;
+  readonly verticalPixelRatio: number;
+}
+interface CanvasRenderingTarget2D {
+  useBitmapCoordinateSpace<T>(f: (scope: BitmapCoordinatesRenderingScope) => T): T;
+}
+
+class SRBandPrimitive
+  implements ISeriesPrimitive, IPrimitivePaneView, IPrimitivePaneRenderer
+{
+  private _series: ISeriesApi<"Candlestick"> | null = null;
+  private _requestUpdate: (() => void) | null = null;
+  private _bands: SRBand[] = [];
+
+  attached(param: SeriesAttachedParameter): void {
+    this._series = param.series as ISeriesApi<"Candlestick">;
+    this._requestUpdate = param.requestUpdate;
+  }
+
+  detached(): void {
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  updateBands(bands: SRBand[]): void {
+    this._bands = bands;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  // ISeriesPrimitive
+  paneViews(): readonly IPrimitivePaneView[] {
+    return [this];
+  }
+
+  // IPrimitivePaneView
+  renderer(): IPrimitivePaneRenderer | null {
+    return this._bands.length > 0 ? this : null;
+  }
+
+  // IPrimitivePaneRenderer
+  draw(target: CanvasRenderingTarget2D): void {
+    const series = this._series;
+    if (!series || this._bands.length === 0) return;
+
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const vpr = scope.verticalPixelRatio;
+      const width = scope.bitmapSize.width;
+
+      for (const band of this._bands) {
+        const yUpper = series.priceToCoordinate(band.upper);
+        const yLower = series.priceToCoordinate(band.lower);
+        if (yUpper === null || yLower === null) continue;
+
+        const top = Math.min(yUpper, yLower) * vpr;
+        const h = Math.abs(yUpper - yLower) * vpr;
+
+        // Filled band
+        ctx.fillStyle = withAlpha(band.color, band.fillAlpha);
+        ctx.fillRect(0, top, width, Math.max(h, 1));
+
+        // Borders (top + bottom)
+        ctx.lineWidth = band.borderWidth * vpr;
+        ctx.strokeStyle = band.borderColor;
+        ctx.beginPath();
+        ctx.moveTo(0, top);
+        ctx.lineTo(width, top);
+        ctx.moveTo(0, top + h);
+        ctx.lineTo(width, top + h);
+        ctx.stroke();
+      }
+    });
+  }
 }
 
 /* ─── props ─── */
@@ -79,6 +201,11 @@ interface CandleChartProps {
   };
   showEMA: boolean;
   emaVisible: Record<string, boolean>;
+  pivots: PivotLevel[];
+  showPivots: boolean;
+  roundNumbers: RoundNumber[];
+  showRoundNumbers: boolean;
+  viewedTimeframe: string;
   loading: boolean;
   error: string | null;
   symbol: string;
@@ -103,6 +230,11 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
       emaLines,
       showEMA,
       emaVisible,
+      pivots,
+      showPivots,
+      roundNumbers,
+      showRoundNumbers,
+      viewedTimeframe,
       loading,
       error,
       symbol,
@@ -123,6 +255,13 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
     const smcPriceLinesRef = useRef<
       ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]
     >([]);
+    const pivotPriceLinesRef = useRef<
+      ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]
+    >([]);
+    const roundNumberPriceLinesRef = useRef<
+      ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]
+    >([]);
+    const srBandPrimitiveRef = useRef<SRBandPrimitive | null>(null);
     const seriesMarkersRef = useRef<any>(null);
     const legendRef = useRef<HTMLDivElement>(null);
     const chartInitialized = useRef(false);
@@ -189,6 +328,9 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
         emaSeriesRef.current = {};
         srPriceLinesRef.current = [];
         smcPriceLinesRef.current = [];
+        pivotPriceLinesRef.current = [];
+        roundNumberPriceLinesRef.current = [];
+        srBandPrimitiveRef.current = null;
         seriesMarkersRef.current = null;
       }
 
@@ -241,6 +383,11 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
       });
       candleSeriesRef.current = candleSeries;
       seriesMarkersRef.current = createSeriesMarkers(candleSeries);
+
+      // SR band primitive (filled horizontal bands for S/R zones)
+      const srBandPrimitive = new SRBandPrimitive();
+      candleSeries.attachPrimitive(srBandPrimitive);
+      srBandPrimitiveRef.current = srBandPrimitive;
 
       // Volume histogram (overlaid at bottom)
       const volumeSeries = chart.addSeries(HistogramSeries, {
@@ -295,6 +442,9 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
           emaSeriesRef.current = {};
           srPriceLinesRef.current = [];
           smcPriceLinesRef.current = [];
+          pivotPriceLinesRef.current = [];
+          roundNumberPriceLinesRef.current = [];
+          srBandPrimitiveRef.current = null;
           seriesMarkersRef.current = null;
           chartInitialized.current = false;
         }
@@ -366,64 +516,140 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
       }
     }, [liveTick]);
 
-    /* ───────────────────── S/R zone price lines ───────────────────── */
+    /* ───────────────────── S/R zone bands (primitive + labelled center line) ───────────────────── */
+    useEffect(() => {
+      const series = candleSeriesRef.current;
+      const primitive = srBandPrimitiveRef.current;
+
+      // Remove old center price lines
+      if (series) {
+        srPriceLinesRef.current.forEach((line) => {
+          try {
+            series.removePriceLine(line);
+          } catch {
+            /* already removed */
+          }
+        });
+        srPriceLinesRef.current = [];
+      }
+
+      if (!primitive) return;
+      if (!showSRZones || srZones.length === 0) {
+        primitive.updateBands([]);
+        return;
+      }
+
+      // Build bands for the primitive + one labelled center price line per zone.
+      const bands: SRBand[] = [];
+      for (const zone of srZones) {
+        const colors = ZONE_COLORS[zone.zone_type] || ZONE_COLORS.both;
+        const isHTF = zone.timeframe !== viewedTimeframe;
+        const isConfluence = zone.confluence === true;
+
+        // Fill opacity encodes strength: 0.06 (weak) → ~0.31 (strong)
+        const fillAlpha = 0.06 + (zone.strength_score || 0) * 0.25;
+
+        // HTF bands get a thicker border; confluence bands a brighter border.
+        const borderWidth = isHTF ? 2 : 1;
+        const borderAlpha = isConfluence ? 0.85 : isHTF ? 0.6 : 0.45;
+
+        bands.push({
+          upper: zone.zone_upper,
+          lower: zone.zone_lower,
+          color: colors.line,
+          fillAlpha,
+          borderWidth,
+          borderColor: withAlpha(colors.line, borderAlpha),
+        });
+
+        // Labelled center line (axis label + compact title).
+        // HTF zones are prefixed with their timeframe (e.g. "4H"); confluence
+        // zones get a "*" marker.
+        const typeTag =
+          zone.zone_type === "support" ? "S" : zone.zone_type === "resistance" ? "R" : "SR";
+        const tfTag = isHTF ? `${zone.timeframe.toUpperCase()} ` : "";
+        const confTag = isConfluence ? "*" : "";
+        const title = `${tfTag}${typeTag}${confTag} ${zone.price_level.toFixed(0)} (${zone.touch_count}×)`;
+
+        const centerLine = series!.createPriceLine({
+          price: zone.price_level,
+          color: withAlpha(colors.line, isConfluence ? 0.9 : 0.7),
+          lineWidth: isHTF ? 2 : 1,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
+          title,
+          lineVisible: true,
+        });
+        srPriceLinesRef.current.push(centerLine);
+      }
+
+      primitive.updateBands(bands);
+    }, [showSRZones, srZones, viewedTimeframe]);
+
+    /* ───────────────────── Pivot point price lines ───────────────────── */
     useEffect(() => {
       if (!candleSeriesRef.current) return;
       const series = candleSeriesRef.current;
 
-      // Remove old price lines
-      srPriceLinesRef.current.forEach((line) => {
+      // Remove old pivot price lines
+      pivotPriceLinesRef.current.forEach((line) => {
         try {
           series.removePriceLine(line);
         } catch {
           /* already removed */
         }
       });
-      srPriceLinesRef.current = [];
+      pivotPriceLinesRef.current = [];
 
-      if (!showSRZones || srZones.length === 0) return;
+      if (!showPivots || pivots.length === 0) return;
 
-      // Add zone price lines
-      for (const zone of srZones) {
-        const colors = ZONE_COLORS[zone.zone_type] || ZONE_COLORS.both;
-
-        // Center line
-        const centerLine = series.createPriceLine({
-          price: zone.price_level,
-          color: colors.line,
-          lineWidth: zone.strength_score > 0.7 ? 2 : 1,
-          lineStyle: 2, // dashed
+      for (const pv of pivots) {
+        const color = PIVOT_COLORS[pv.direction] || PIVOT_COLORS.pivot;
+        // Pivot P is solid; support/resistance levels are dashed.
+        const isPivot = pv.direction === "pivot";
+        const line = series.createPriceLine({
+          price: pv.level,
+          color: withAlpha(color, 0.6),
+          lineWidth: 1,
+          lineStyle: isPivot ? 0 : 2, // 0 = solid, 2 = dashed
           axisLabelVisible: true,
-          title: `${zone.zone_type === "support" ? "S" : zone.zone_type === "resistance" ? "R" : "SR"} ${zone.price_level.toFixed(0)} (${(zone.strength_score * 100).toFixed(0)}%)`,
+          title: pv.label,
           lineVisible: true,
         });
-        srPriceLinesRef.current.push(centerLine);
-
-        // Upper bound (thin, more transparent)
-        const upperLine = series.createPriceLine({
-          price: zone.zone_upper,
-          color: colors.line + "40",
-          lineWidth: 1,
-          lineStyle: 3, // dotted
-          axisLabelVisible: false,
-          title: "",
-          lineVisible: true,
-        });
-        srPriceLinesRef.current.push(upperLine);
-
-        // Lower bound
-        const lowerLine = series.createPriceLine({
-          price: zone.zone_lower,
-          color: colors.line + "40",
-          lineWidth: 1,
-          lineStyle: 3,
-          axisLabelVisible: false,
-          title: "",
-          lineVisible: true,
-        });
-        srPriceLinesRef.current.push(lowerLine);
+        pivotPriceLinesRef.current.push(line);
       }
-    }, [showSRZones, srZones]);
+    }, [showPivots, pivots]);
+
+    /* ───────────────────── Psychological round-number lines (faint) ───────────────────── */
+    useEffect(() => {
+      if (!candleSeriesRef.current) return;
+      const series = candleSeriesRef.current;
+
+      // Remove old round-number price lines
+      roundNumberPriceLinesRef.current.forEach((line) => {
+        try {
+          series.removePriceLine(line);
+        } catch {
+          /* already removed */
+        }
+      });
+      roundNumberPriceLinesRef.current = [];
+
+      if (!showRoundNumbers || roundNumbers.length === 0) return;
+
+      for (const rn of roundNumbers) {
+        const line = series.createPriceLine({
+          price: rn.price_level,
+          color: "rgba(148, 163, 184, 0.35)", // slate-400, faint
+          lineWidth: 1,
+          lineStyle: 1, // dotted
+          axisLabelVisible: false,
+          title: "",
+          lineVisible: true,
+        });
+        roundNumberPriceLinesRef.current.push(line);
+      }
+    }, [showRoundNumbers, roundNumbers]);
 
     /* ───────────────────── SMC zone price lines (FVG / OB) ───────────────────── */
     useEffect(() => {
@@ -752,7 +978,7 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
         )}
 
         {/* Overlay info badges — shifted down when countdown visible */}
-        {showSRZones && srZones.length > 0 && (
+        {(showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0) ? (
           <div
             className="z-10 absolute pointer-events-none"
             style={{
@@ -761,10 +987,22 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
             }}
           >
             <span className="bg-slate-800/80 px-2 py-1 border border-slate-600/40 rounded text-[10px] text-slate-400">
-              {srZones.length} S/R zone{srZones.length !== 1 ? "s" : ""}
+              {[
+                showSRZones && srZones.length > 0
+                  ? `${srZones.length} S/R`
+                  : null,
+                showPivots && pivots.length > 0
+                  ? `${pivots.length} Piv`
+                  : null,
+                showRoundNumbers && roundNumbers.length > 0
+                  ? `${roundNumbers.length} Psych`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           </div>
-        )}
+        ) : null}
 
         {/* EMA legend */}
         {showEMA && (
@@ -772,10 +1010,10 @@ const CandleChart = forwardRef<CandleChartRef, CandleChartProps>(
             className="z-10 absolute flex gap-2 pointer-events-none"
             style={{
               top: countdown
-                ? showSRZones && srZones.length > 0
+                ? (showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0)
                   ? "4rem"
                   : "2.5rem"
-                : showSRZones && srZones.length > 0
+                : (showSRZones && srZones.length > 0) || (showPivots && pivots.length > 0) || (showRoundNumbers && roundNumbers.length > 0)
                   ? "2.5rem"
                   : "0.75rem",
               right: "1rem",

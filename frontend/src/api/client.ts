@@ -112,13 +112,33 @@ export interface SRZone {
   last_tested: string | null;
   created_at: string | null;
   updated_at: string | null;
+  // Derived (MTF confluence) — set by the /sr-zones endpoint, optional for
+  // older callers that don't request MTF.
+  confluence?: boolean;
+  confluence_with?: string[];
+}
+
+export interface RoundNumber {
+  price_level: number;
+  zone_type: 'support' | 'resistance' | 'both';
 }
 
 export interface SRZonesResponse {
   symbol: string;
+  timeframe: string;
   zones: SRZone[];
   count: number;
   last_refreshed: string | null;
+  round_numbers?: RoundNumber[];
+}
+
+export interface SRZonesParams {
+  minTouches?: number;
+  limit?: number;
+  includeHtf?: boolean;
+  htfDepth?: number;
+  includeRoundNumbers?: boolean;
+  nearPrice?: number;
 }
 
 export const fetchIndicators = async (
@@ -134,16 +154,19 @@ export const fetchIndicators = async (
 
 export const fetchSRZones = async (
   symbol: string,
-  timeframe?: string,
-  minStrength?: number,
-  nearPrice?: number
+  timeframe: string,
+  params?: SRZonesParams
 ): Promise<SRZonesResponse> => {
   const { data } = await apiClient.get('/sr-zones', {
     params: {
       symbol,
       timeframe,
-      min_strength: minStrength,
-      near_price: nearPrice,
+      min_touches: params?.minTouches,
+      limit: params?.limit,
+      include_htf: params?.includeHtf,
+      htf_depth: params?.htfDepth,
+      include_round_numbers: params?.includeRoundNumbers,
+      near_price: params?.nearPrice,
     },
   });
   return data;
@@ -154,6 +177,37 @@ export const refreshSRZones = async (
   timeframe?: string
 ): Promise<{ message: string; results: { symbol: string; timeframe: string; zones_detected: number }[] }> => {
   const { data } = await apiClient.post('/sr-zones/refresh', { symbol, timeframe });
+  return data;
+};
+
+// ---------- Pivot Points (Camarilla / Standard) ----------
+
+export interface PivotLevel {
+  level: number;
+  label: string;
+  variant: 'camarilla' | 'standard' | 'all';
+  direction: 'support' | 'resistance' | 'pivot';
+  period: string;
+  source_open_time: string | null;
+}
+
+export interface PivotsResponse {
+  symbol: string;
+  variant: string;
+  period: string;
+  levels: PivotLevel[];
+  count: number;
+  source_open_time: string | null;
+}
+
+export const fetchPivots = async (
+  symbol: string,
+  variant: 'camarilla' | 'standard' | 'all' = 'camarilla',
+  period: '1d' | '1w' = '1d'
+): Promise<PivotsResponse> => {
+  const { data } = await apiClient.get('/sr-zones/pivots', {
+    params: { symbol, variant, period },
+  });
   return data;
 };
 

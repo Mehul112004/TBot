@@ -3,7 +3,7 @@ import { useSSE } from '../../hooks/useSSE';
 import type { SSEEventType, LiveCandleEvent } from '../../types/signals';
 import ChartControls from './ChartControls';
 import CandleChart, { type CandleChartRef } from './CandleChart';
-import { useChartData } from './useChartData';
+import { useChartData, type PivotVariant, type PivotPeriod } from './useChartData';
 import { Wifi, WifiOff, RotateCcw } from 'lucide-react';
 
 export default function Charts() {
@@ -14,9 +14,13 @@ export default function Charts() {
   const [timeframe, setTimeframe] = useState('4h');
   const [limit, setLimit] = useState(500);
   const [showSRZones, setShowSRZones] = useState(true);
-  const [minStrength, setMinStrength] = useState(0.2);
+  const [minTouches, setMinTouches] = useState(3);
   const [showSMCZones, setShowSMCZones] = useState(true);
   const [showEMA, setShowEMA] = useState(true);
+  const [showPivots, setShowPivots] = useState(true);
+  const [pivotVariant, setPivotVariant] = useState<PivotVariant>('camarilla');
+  const [pivotPeriod, setPivotPeriod] = useState<PivotPeriod>('1d');
+  const [showRoundNumbers, setShowRoundNumbers] = useState(false);
   const [emaVisible, setEmaVisible] = useState<Record<string, boolean>>({
     ema_9: true,
     ema_21: true,
@@ -31,6 +35,8 @@ export default function Charts() {
     srZones,
     smcZones,
     emaLines,
+    pivots,
+    roundNumbers,
     loading,
     error,
     applyLiveCandle,
@@ -38,7 +44,10 @@ export default function Charts() {
     liveTick,
     closeTime,
     currentRegime,
-  } = useChartData(symbol, timeframe, limit, showSRZones, minStrength, showEMA, showSMCZones);
+  } = useChartData(
+    symbol, timeframe, limit, showSRZones, minTouches, showEMA, showSMCZones,
+    showPivots, pivotVariant, pivotPeriod, showRoundNumbers,
+  );
 
   /* ─── SSE live candle + price updates ─── */
   const handleSSEEvent = useCallback(
@@ -121,17 +130,25 @@ export default function Charts() {
         timeframe={timeframe}
         limit={limit}
         showSRZones={showSRZones}
-        minStrength={minStrength}
+        minTouches={minTouches}
         showEMA={showEMA}
         showSMCZones={showSMCZones}
+        showPivots={showPivots}
+        pivotVariant={pivotVariant}
+        pivotPeriod={pivotPeriod}
+        showRoundNumbers={showRoundNumbers}
         emaVisible={emaVisible}
         onSymbolChange={setSymbol}
         onTimeframeChange={setTimeframe}
         onLimitChange={setLimit}
         onToggleSRZones={() => setShowSRZones(p => !p)}
-        onMinStrengthChange={setMinStrength}
+        onMinTouchesChange={setMinTouches}
         onToggleEMA={() => setShowEMA(p => !p)}
         onToggleSMCZones={() => setShowSMCZones(p => !p)}
+        onTogglePivots={() => setShowPivots(p => !p)}
+        onPivotVariantChange={setPivotVariant}
+        onPivotPeriodChange={setPivotPeriod}
+        onToggleRoundNumbers={() => setShowRoundNumbers(p => !p)}
         onToggleEMALine={toggleEMALine}
       />
 
@@ -146,6 +163,11 @@ export default function Charts() {
         emaLines={emaLines}
         showEMA={showEMA}
         emaVisible={emaVisible}
+        pivots={pivots}
+        showPivots={showPivots}
+        roundNumbers={roundNumbers}
+        showRoundNumbers={showRoundNumbers}
+        viewedTimeframe={timeframe}
         loading={loading}
         error={error}
         symbol={symbol}

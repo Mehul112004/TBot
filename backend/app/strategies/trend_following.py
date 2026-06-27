@@ -77,8 +77,12 @@ class TrendFollowingStrategy(BaseStrategy):
         gate_3 = (g1_bull & g3_bull) | (g1_bear & g3_bear)
 
         # Combine hard gates
-        hard_passed = gate_1 & gate_2 & gate_3
-        total_hard = 3
+        # ── Gate 4 (HARD): Trend must NOT be exhausting ──
+        from app.core.market_regime import detect_trend_exhaustion
+        gate_4 = ~detect_trend_exhaustion(df)
+
+        hard_passed = gate_1 & gate_2 & gate_3 & gate_4
+        total_hard = 4
 
         # ── Soft Gate 1: Volume confirmation (above average) ──
         sg1 = df['volume_ma'].notna() & (df['volume'] > df['volume_ma'])

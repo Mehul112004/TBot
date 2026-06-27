@@ -189,3 +189,146 @@ def get_trend_direction(df: pd.DataFrame, idx: int = -1) -> str:
     if regime == 'TRENDING_DOWN':
         return 'DOWN'
     return 'NEUTRAL'
+
+
+def detect_trend_exhaustion(df: pd.DataFrame, cooldown_bars: int = 6) -> pd.Series:
+    """
+    Detect when an active trend is showing signs of exhaustion or reversal.
+
+    Checks 5 independent conditions — if 2+ fire simultaneously, the trend
+    is considered exhausting and trend-continuation strategies should pause.
+
+    Conditions (mirrored for bull/bear):
+      1. RSI recovering: RSI making higher lows while in downtrend
+      2. ADX declining:  ADX dropped ≥5 pts from its 10-bar peak
+      3. EMA 9 reclaim:  price closed on the wrong side of EMA 9 (2 of 3 bars)
+      4. MACD decel:     |MACD histogram| shrinking for 3+ consecutive bars
+      5. Volume exhaust: trend-direction candles have below-avg volume
+
+    Cooldown: once triggered, stays True for at least ``cooldown_bars``
+    candles so the strategy doesn't whipsaw back in immediately.  When the
+    conditions genuinely clear AND the cooldown has elapsed, signals resume.
+
+    Args:
+        df: DataFrame with columns: regime, close, open, rsi, adx, ema_9,
+            volume, volume_ma.  macd_histogram is used if present.
+        cooldown_bars: minimum bars to stay suppressed after triggering.
+
+    Returns:
+        pd.Series[bool] aligned to df.index.  True = trend is exhausting.
+    """
+    n = len(df)
+    exhausted = pd.Series(False, index=df.index)
+
+    if n < 30 or 'regime' not in df.columns:
+        return exhausted
+
+    regime = df['regime']
+    is_down = regime == 'TRENDING_DOWN'
+    is_up = regime == 'TRENDING_UP'
+    is_trending_mask = is_down | is_up
+
+    # If nothing is trending, nothing to exhaust
+    if not is_trending_mask.any():
+        return exhausted
+
+    close = df['close']
+
+    # ── Condition 1: RSI momentum recovery ──────────────────────────
+    cond1 = pd.Series(False, index=df.index)
+    if 'rsi' in df.columns:
+        rsi = df['rsi']
+        rsi_10_low = rsi.rolling(10).min()
+        rsi_30_low = rsi.rolling(30).min()
+        price_10_low = close.rolling(10).min()
+        price_30_low = close.rolling(30).min()
+
+        rsi_10_high = rsi.rolling(10).max()
+        rsi_30_high = rsi.rolling(30).max()
+        price_10_high = close.rolling(10).max()
+        price_30_high = close.rolling(30).max()
+
+        # Bearish exhaustion: higher lows in both price and RSI (momentum recovering)
+        bear_c1 = (is_down
+                   & (price_10_low > price_30_low.shift(10))
+                   & (rsi_10_low > rsi_30_low.shift(10)))
+        # Bullish exhaustion: lower highs in both price and RSI
+        bull_c1 = (is_up
+                   & (price_10_high < price_30_high.shift(10))
+                   & (rsi_10_high < rsi_30_high.shift(10)))
+        cond1 = bear_c1.fillna(False) | bull_c1.fillna(False)
+
+    # ── Condition 2: ADX declining from peak ────────────────────────
+    cond2 = pd.Series(False, index=df.index)
+    if 'adx' in df.columns:
+        adx = df['adx']
+        adx_peak_10 = adx.rolling(10).max()
+        cond2 = is_trending_mask & ((adx_peak_10 - adx) >= 5).fillna(False)
+
+    # ── Condition 3: Price reclaimed EMA 9 against trend ────────────
+    cond3 = pd.Series(False, index=df.index)
+    if 'ema_9' in df.columns:
+        ema9 = df['ema_9']
+        above_ema9 = (close > ema9).astype(float)
+        below_ema9 = (close < ema9).astype(float)
+        # Bearish exhaustion: closed above EMA 9 in ≥2 of last 3 bars
+        bear_c3 = is_down & (above_ema9.rolling(3).sum() >= 2)
+        # Bullish exhaustion: closed below EMA 9 in ≥2 of last 3 bars
+        bull_c3 = is_up & (below_ema9.rolling(3).sum() >= 2)
+        cond3 = bear_c3.fillna(False) | bull_c3.fillna(False)
+
+    # ── Condition 4: MACD histogram decelerating ────────────────────
+    cond4 = pd.Series(False, index=df.index)
+    if 'macd_histogram' in df.columns:
+        hist_abs = df['macd_histogram'].abs()
+        # 3 consecutive bars of shrinking |histogram|
+        shrinking = ((hist_abs < hist_abs.shift(1))
+                     & (hist_abs.shift(1) < hist_abs.shift(2))
+                     & (hist_abs.shift(2) < hist_abs.shift(3)))
+        cond4 = is_trending_mask & shrinking.fillna(False)
+    else:
+        # Compute MACD on the fly if not present
+        from app.core.indicators import compute_macd
+        macd_res = compute_macd(close)
+        hist_abs = macd_res['macd_histogram'].abs()
+        shrinking = ((hist_abs < hist_abs.shift(1))
+                     & (hist_abs.shift(1) < hist_abs.shift(2))
+                     & (hist_abs.shift(2) < hist_abs.shift(3)))
+        cond4 = is_trending_mask & shrinking.fillna(False)
+
+    # ── Condition 5: Trend-direction candles on weak volume ─────────
+    cond5 = pd.Series(False, index=df.index)
+    if 'volume_ma' in df.columns:
+        vol = df['volume']
+        vol_ma = df['volume_ma']
+        is_bear_candle = close < df['open']
+        is_bull_candle = close > df['open']
+
+        # Average volume of bearish candles over a 10-bar window
+        bear_vol = vol.where(is_bear_candle, np.nan)
+        bull_vol = vol.where(is_bull_candle, np.nan)
+        bear_vol_avg = bear_vol.rolling(10, min_periods=3).mean()
+        bull_vol_avg = bull_vol.rolling(10, min_periods=3).mean()
+
+        bear_c5 = is_down & bear_vol_avg.notna() & (bear_vol_avg < vol_ma * 0.7)
+        bull_c5 = is_up & bull_vol_avg.notna() & (bull_vol_avg < vol_ma * 0.7)
+        cond5 = bear_c5.fillna(False) | bull_c5.fillna(False)
+
+    # ── Combine: 2+ conditions → exhausted ──────────────────────────
+    score = (cond1.astype(int) + cond2.astype(int) + cond3.astype(int)
+             + cond4.astype(int) + cond5.astype(int))
+    raw_exhaustion = score >= 2
+
+    # ── Cooldown: once triggered, persist for cooldown_bars ─────────
+    # rolling(N).max() looks at the current + previous N-1 bars, so if
+    # bar K triggers, bars K through K+N-1 will all see that trigger
+    # and remain True.  This gives a natural cooldown.
+    if cooldown_bars > 1:
+        exhausted = (raw_exhaustion.astype(int)
+                     .rolling(cooldown_bars, min_periods=1)
+                     .max()
+                     .astype(bool))
+    else:
+        exhausted = raw_exhaustion
+
+    return exhausted

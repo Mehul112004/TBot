@@ -70,9 +70,13 @@ class Burner920Strategy(BaseStrategy):
         g3_bull = ema9.notna() & atr.notna() & (df['low'] <= ema9 + 0.3 * atr) & (df['close'] > ema9)
         g3_bear = ema9.notna() & atr.notna() & (df['high'] >= ema9 - 0.3 * atr) & (df['close'] < ema9)
 
-        hard_passed = ((g1_bull & g2_bull & g3_bull) |
-                       (g1_bear & g2_bear & g3_bear))
-        total_hard = 3
+        # ── Hard Gate 4: Trend must NOT be exhausting ──
+        from app.core.market_regime import detect_trend_exhaustion
+        g4 = ~detect_trend_exhaustion(df)
+
+        hard_passed = ((g1_bull & g2_bull & g3_bull & g4) |
+                       (g1_bear & g2_bear & g3_bear & g4))
+        total_hard = 4
 
         # ── Soft Gate 1: RSI momentum (50-75 bull, 25-50 bear) ──
         rsi = df['rsi']

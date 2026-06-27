@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { fetchDatasets } from "../../api/client";
-import { ChevronDown, Layers, TrendingUp, BarChart3, Box } from "lucide-react";
+import {
+  ChevronDown,
+  Layers,
+  TrendingUp,
+  BarChart3,
+  Box,
+  Target,
+  Hash,
+} from "lucide-react";
+import type { PivotVariant, PivotPeriod } from "./useChartData";
 
 interface Dataset {
   symbol: string;
@@ -16,17 +25,25 @@ interface ChartControlsProps {
   timeframe: string;
   limit: number;
   showSRZones: boolean;
-  minStrength: number;
+  minTouches: number;
   showEMA: boolean;
   showSMCZones: boolean;
+  showPivots: boolean;
+  pivotVariant: PivotVariant;
+  pivotPeriod: PivotPeriod;
+  showRoundNumbers: boolean;
   emaVisible: Record<string, boolean>;
   onSymbolChange: (s: string) => void;
   onTimeframeChange: (tf: string) => void;
   onLimitChange: (l: number) => void;
   onToggleSRZones: () => void;
-  onMinStrengthChange: (v: number) => void;
+  onMinTouchesChange: (v: number) => void;
   onToggleEMA: () => void;
   onToggleSMCZones: () => void;
+  onTogglePivots: () => void;
+  onPivotVariantChange: (v: PivotVariant) => void;
+  onPivotPeriodChange: (p: PivotPeriod) => void;
+  onToggleRoundNumbers: () => void;
   onToggleEMALine: (key: string) => void;
 }
 
@@ -35,17 +52,25 @@ export default function ChartControls({
   timeframe,
   limit,
   showSRZones,
-  minStrength,
+  minTouches,
   showEMA,
   showSMCZones,
+  showPivots,
+  pivotVariant,
+  pivotPeriod,
+  showRoundNumbers,
   emaVisible,
   onSymbolChange,
   onTimeframeChange,
   onLimitChange,
   onToggleSRZones,
-  onMinStrengthChange,
+  onMinTouchesChange,
   onToggleEMA,
   onToggleSMCZones,
+  onTogglePivots,
+  onPivotVariantChange,
+  onPivotPeriodChange,
+  onToggleRoundNumbers,
   onToggleEMALine,
 }: ChartControlsProps) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -180,26 +205,89 @@ export default function ChartControls({
         S/R Zones
       </button>
 
-      {/* Strength Slider (visible when S/R zones are on) */}
+      {/* Min Touches Stepper (visible when S/R zones are on) */}
       {showSRZones && (
-        <div className="flex items-center gap-2" id="strength-slider">
+        <div className="flex items-center gap-2" id="touches-stepper">
           <span className="text-[10px] text-slate-500 uppercase tracking-wider">
-            Min
+            Min Touches
           </span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={minStrength}
-            onChange={(e) => onMinStrengthChange(parseFloat(e.target.value))}
-            className="w-20 h-1 cursor-pointer accent-emerald-500"
-          />
-          <span className="w-7 font-mono text-slate-400 text-xs">
-            {minStrength.toFixed(2)}
-          </span>
+          <div className="flex border border-slate-600/60 rounded overflow-hidden">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                onClick={() => onMinTouchesChange(n)}
+                className={`px-2 py-0.5 text-[11px] font-mono font-semibold transition-all ${
+                  minTouches === n
+                    ? "bg-emerald-500/25 text-emerald-300"
+                    : "text-slate-400 hover:text-white hover:bg-slate-700/60"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
         </div>
       )}
+
+      {/* Divider */}
+      <div className="bg-slate-600/60 mx-1 w-px h-6" />
+
+      {/* Pivot Points Toggle */}
+      <button
+        onClick={onTogglePivots}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+          showPivots
+            ? "bg-purple-500/15 text-purple-400 border-purple-500/30 shadow-[0_0_12px_rgba(168,85,247,0.1)]"
+            : "text-slate-400 border-slate-600/60 hover:text-white hover:bg-slate-700/60"
+        }`}
+        id="toggle-pivots"
+      >
+        <Target size={13} />
+        Pivots
+      </button>
+
+      {/* Pivot variant + period (visible when pivots are on) */}
+      {showPivots && (
+        <div className="flex items-center gap-1.5" id="pivot-options">
+          <select
+            value={pivotVariant}
+            onChange={(e) => onPivotVariantChange(e.target.value as PivotVariant)}
+            className="bg-slate-700/80 hover:bg-slate-700 px-2 py-1 border border-slate-600/60 rounded text-slate-300 text-[11px] cursor-pointer appearance-none focus:outline-none"
+            title="Pivot variant"
+          >
+            <option value="camarilla">Camarilla</option>
+            <option value="standard">Standard</option>
+            <option value="all">All</option>
+          </select>
+          <select
+            value={pivotPeriod}
+            onChange={(e) => onPivotPeriodChange(e.target.value as PivotPeriod)}
+            className="bg-slate-700/80 hover:bg-slate-700 px-2 py-1 border border-slate-600/60 rounded text-slate-300 text-[11px] cursor-pointer appearance-none focus:outline-none"
+            title="Pivot source period"
+          >
+            <option value="1d">Prev Day</option>
+            <option value="1w">Prev Week</option>
+          </select>
+        </div>
+      )}
+
+      {/* Divider */}
+      <div className="bg-slate-600/60 mx-1 w-px h-6" />
+
+      {/* Psychological Round-Number Levels Toggle */}
+      <button
+        onClick={onToggleRoundNumbers}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+          showRoundNumbers
+            ? "bg-amber-500/15 text-amber-400 border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.1)]"
+            : "text-slate-400 border-slate-600/60 hover:text-white hover:bg-slate-700/60"
+        }`}
+        id="toggle-round-numbers"
+        title="Large-grain psychological price levels (faint lines)"
+      >
+        <Hash size={13} />
+        Psych Levels
+      </button>
 
       {/* Divider */}
       <div className="bg-slate-600/60 mx-1 w-px h-6" />

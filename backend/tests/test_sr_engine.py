@@ -163,22 +163,38 @@ class TestRoundNumbers:
         assert 3500.0 in levels
 
     def test_sol_round_numbers(self):
-        """SOL round numbers should be at $10 and $50 increments."""
-        zones = SREngine.detect_round_numbers('SOLUSDT', 150.0)
+        """SOL round numbers should be at $10 (small) and $50 (large) increments."""
+        # Default grain is 'large' (50); use 'both' to also cover the small grain.
+        zones = SREngine.detect_round_numbers('SOLUSDT', 150.0, grain='both')
 
         levels = [z['price_level'] for z in zones]
         assert 140.0 in levels
         assert 150.0 in levels
         assert 160.0 in levels
 
-    def test_xrp_round_numbers(self):
-        """XRP round numbers should be at $0.10 and $0.50 increments."""
-        zones = SREngine.detect_round_numbers('XRPUSDT', 0.65)
+    def test_xrp_round_numbers_dynamic(self):
+        """XRP (no longer in static config) should still get sensible dynamic grains."""
+        # XRP at $0.65 → dynamic large grain ≈ 0.05, small ≈ 0.01.
+        # Use 'both' so small-grain levels also appear.
+        zones = SREngine.detect_round_numbers('XRPUSDT', 0.65, grain='both')
 
-        levels = [round(z['price_level'], 2) for z in zones]
-        # At price 0.65, ±15% range is ~0.55 to ~0.75
+        levels = [round(z['price_level'], 3) for z in zones]
+        # ±15% range is ~0.55 to ~0.75; expect 0.05-grain levels within that.
+        # e.g. 0.60, 0.65, 0.70 should all be present with large grain 0.05.
         assert 0.60 in levels
+        assert 0.65 in levels
         assert 0.70 in levels
+
+    def test_default_grain_is_large_only(self):
+        """By default only the sparse large grain should be emitted (de-bloat)."""
+        # BTC large grain = 5000; small grain = 1000.
+        zones = SREngine.detect_round_numbers('BTCUSDT', 67000.0)
+        levels = [z['price_level'] for z in zones]
+
+        assert 65000.0 in levels   # large grain
+        assert 70000.0 in levels   # large grain
+        assert 66000.0 not in levels  # small grain — excluded by default
+        assert 68000.0 not in levels  # small grain — excluded by default
 
     def test_round_numbers_range(self):
         """Generated levels should be within ±15% of the current price."""
@@ -206,10 +222,19 @@ class TestRoundNumbers:
             elif zone['price_level'] > current_price:
                 assert zone['zone_type'] == 'resistance'
 
-    def test_unknown_symbol_fallback(self):
-        """Unknown symbols should use the default round number config."""
-        zones = SREngine.detect_round_numbers('DOGEUSDT', 0.15)
-        # Should not crash — uses DEFAULT_ROUND_CONFIG
+    def test_unknown_symbol_dynamic_fallback(self):
+        """Unknown symbols derive grains dynamically from price (no static config)."""
+        # BCHUSDT at $204 → dynamic large grain ≈ 10, small ≈ 2.
+        zones = SREngine.detect_round_numbers('BCHUSDT', 204.0, grain='both')
+        assert isinstance(zones, list)
+        levels = [z['price_level'] for z in zones]
+        # ±15% range is ~174 to ~235; expect 10-grain levels at 180/190/200/210/220/230.
+        for expected in (180.0, 200.0, 220.0):
+            assert expected in levels, f"expected {expected} in {levels}"
+
+    def test_unknown_symbol_sub_unit_price(self):
+        """Sub-$1 symbols should still get sensible grains (no crash on log10)."""
+        zones = SREngine.detect_round_numbers('SHIBUSDT', 0.00001234, grain='both')
         assert isinstance(zones, list)
 
 
@@ -217,13 +242,13 @@ class TestZoneMerging:
     """Tests for zone merging logic."""
 
     def test_merge_nearby_zones(self):
-        """Zones within 0.5 × ATR should be merged."""
+        """Zones within 0.75 × ATR should be merged."""
         atr = 100.0
         zones = [
             {'price_level': 1000.0, 'zone_type': 'support', 'detection_method': 'swing', 'timestamp': datetime.now()},
             {'price_level': 1020.0, 'zone_type': 'support', 'detection_method': 'swing', 'timestamp': datetime.now()},
         ]
-        # 1020 - 1000 = 20, which is < 0.5 * 100 = 50 → should merge
+        # 1020 - 1000 = 20, which is < 0.75 * 100 = 75 → should merge
 
         result = SREngine.merge_zones(zones, atr)
         assert len(result) == 1
@@ -237,7 +262,7 @@ class TestZoneMerging:
             {'price_level': 1000.0, 'zone_type': 'support', 'detection_method': 'swing', 'timestamp': datetime.now()},
             {'price_level': 1200.0, 'zone_type': 'resistance', 'detection_method': 'swing', 'timestamp': datetime.now()},
         ]
-        # 1200 - 1000 = 200, which is > 0.5 * 100 = 50 → should NOT merge
+        # 1200 - 1000 = 200, which is > 0.75 * 100 = 75 → should NOT merge
 
         result = SREngine.merge_zones(zones, atr)
         assert len(result) == 2
@@ -249,6 +274,7 @@ class TestZoneMerging:
             {'price_level': 1000.0, 'zone_type': 'support', 'detection_method': 'swing', 'timestamp': datetime.now()},
             {'price_level': 1010.0, 'zone_type': 'resistance', 'detection_method': 'swing', 'timestamp': datetime.now()},
         ]
+        # 10 < 0.75 * 100 = 75 → merge
 
         result = SREngine.merge_zones(zones, atr)
         assert len(result) == 1
@@ -333,3 +359,85 @@ class TestStrengthScoring:
         for tf in expected_timeframes:
             assert tf in TIMEFRAME_WEIGHTS
             assert 0 < TIMEFRAME_WEIGHTS[tf] <= 1.0
+
+    def test_zero_touches_scores_zero(self):
+        """A zone with fewer than 2 post-formation touches must score 0."""
+        # Zone band far from any candle → no touches.
+        df = _make_synthetic_candles(50, base_price=100.0)
+        zone = {
+            'price_level': 500.0,
+            'zone_upper': 501.0,
+            'zone_lower': 499.0,
+        }
+        scored = SREngine.score_zone(zone, df, '1h', formation_idx=5)
+        assert scored['touch_count'] == 0
+        assert scored['strength_score'] == 0.0
+
+    def test_single_touch_scores_zero(self):
+        """A zone with exactly 1 post-formation touch must score 0 (touch-gated)."""
+        # Base candles sit at 5.0 (far from the band 9.8-10.2) so they don't touch.
+        n = 20
+        dates = [datetime(2025, 1, 1) + timedelta(hours=i) for i in range(n)]
+        highs = [5.0] * n
+        lows = [4.0] * n
+        closes = [4.5] * n
+        # Bar at idx 10 (after formation_idx=5) touches band 9.8 - 10.2
+        highs[10] = 10.1
+        lows[10] = 9.9
+        df = pd.DataFrame({'open_time': dates, 'high': highs, 'low': lows, 'close': closes, 'open': closes, 'volume': 1})
+        zone = {'price_level': 10.0, 'zone_upper': 10.2, 'zone_lower': 9.8}
+        scored = SREngine.score_zone(zone, df, '1h', formation_idx=5)
+        assert scored['touch_count'] == 1
+        assert scored['strength_score'] == 0.0
+
+    def test_touches_only_counted_after_formation(self):
+        """A touch BEFORE formation must NOT count; a touch AFTER must."""
+        # Base candles at 5.0 (far from band 9.8-10.2).
+        n = 20
+        dates = [datetime(2025, 1, 1) + timedelta(hours=i) for i in range(n)]
+        highs = [5.0] * n
+        lows = [4.0] * n
+        closes = [4.5] * n
+        # Touch at idx 2 (BEFORE formation_idx=10) — must not count
+        highs[2] = 10.1
+        lows[2] = 9.9
+        # Touches at idx 15 and 16 (AFTER formation) — must count (2 → strength > 0)
+        highs[15] = 10.1
+        lows[15] = 9.9
+        highs[16] = 10.1
+        lows[16] = 9.9
+        df = pd.DataFrame({'open_time': dates, 'high': highs, 'low': lows, 'close': closes, 'open': closes, 'volume': 1})
+        zone = {'price_level': 10.0, 'zone_upper': 10.2, 'zone_lower': 9.8}
+        scored = SREngine.score_zone(zone, df, '1h', formation_idx=10)
+        # Only idx 15 and 16 count → 2 touches (idx 2 excluded as pre-formation)
+        assert scored['touch_count'] == 2
+        assert scored['strength_score'] > 0.0
+
+    def test_recency_decay_reduces_stale_zone_strength(self):
+        """A zone last tested long ago should score lower than one tested recently."""
+        n = 200
+        dates = [datetime(2025, 1, 1) + timedelta(hours=i) for i in range(n)]
+        # Bars 0-9 sit low (50.0) touching band A [49-51]; bars 10-199 sit at
+        # 100.5/99.5 touching band B [99-101] near the end. So:
+        #   band B is last tested at idx 199 (recent)  → age ~0
+        #   band A is last tested at idx 9   (stale)   → age ~190
+        highs = [0.0] * n
+        lows = [0.0] * n
+        closes = [0.0] * n
+        for i in range(n):
+            if i < 10:
+                highs[i], lows[i], closes[i] = 50.5, 49.5, 50.0
+            else:
+                highs[i], lows[i], closes[i] = 100.5, 99.5, 100.0
+        df = pd.DataFrame({'open_time': dates, 'high': highs, 'low': lows, 'close': closes, 'open': closes, 'volume': 1})
+
+        zone_recent = {'price_level': 100.0, 'zone_upper': 101.0, 'zone_lower': 99.0}
+        zone_stale = {'price_level': 50.0, 'zone_upper': 51.0, 'zone_lower': 49.0}
+
+        # Both zones exist from the earliest data (formation_idx=None).
+        scored_recent = SREngine.score_zone(zone_recent, df, '1h', formation_idx=None)
+        scored_stale = SREngine.score_zone(zone_stale, df, '1h', formation_idx=None)
+
+        assert scored_recent['strength_score'] > scored_stale['strength_score']
+        assert scored_stale['strength_score'] < 0.5  # heavily decayed
+
