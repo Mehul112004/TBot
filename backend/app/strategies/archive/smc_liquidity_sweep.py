@@ -151,7 +151,7 @@ class SMCLiquiditySweepStrategy(BaseStrategy):
         return best[1], len(cluster_candidates)
 
     def scan(self, symbol, timeframe, candles, indicators, sr_zones, htf_candles=None):
-        from app.core.fractals import find_fractal_points
+        from app.strategies.archive.smc_v1.fractals import find_fractal_points
 
         if len(candles) < self.LOOKBACK: return None
         window = candles[-self.LOOKBACK:]

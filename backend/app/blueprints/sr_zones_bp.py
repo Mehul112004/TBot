@@ -342,8 +342,8 @@ def get_smc_zones():
 
     try:
         from app.core.data_utils import get_finalized_candles, StaleDataError
-        from app.core.market_structure import extract_fvgs, extract_order_blocks
-        from app.core.events import detect_choch, detect_liquidity_sweep
+        from app.strategies.archive.smc_v1.market_structure import extract_fvgs, extract_order_blocks
+        from app.strategies.archive.smc_v1.events import detect_choch, detect_liquidity_sweep
 
         try:
             df = get_finalized_candles(symbol, timeframe, limit=limit)

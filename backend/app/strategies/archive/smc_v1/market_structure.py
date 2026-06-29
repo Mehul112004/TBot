@@ -28,7 +28,7 @@ import pandas as pd
 from typing import Optional
 
 from app.core.indicators import compute_atr
-from app.core.fractals import detect_swing_points_df, build_swing_list, determine_trend_from_swings
+from app.strategies.archive.smc_v1.fractals import detect_swing_points_df, build_swing_list, determine_trend_from_swings
 
 # Suppress harmless pandas FutureWarnings from forward-fill / NaT column init
 # These fire heavily during live-tick FVG/OB extraction (EMA Cross Alert strategy)

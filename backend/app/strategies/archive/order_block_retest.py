@@ -26,7 +26,7 @@ from typing import Optional
 
 from app.core.base_strategy import BaseStrategy, Candle, Indicators, SetupSignal
 from app.core.base_strategy import safe_lt, safe_gt, safe_between
-from app.core.fractals import find_fractal_points
+from app.strategies.archive.smc_v1.fractals import find_fractal_points
 
 
 class OrderBlockRetestStrategy(BaseStrategy):

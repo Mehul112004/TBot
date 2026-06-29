@@ -151,7 +151,7 @@ class SMCStructureShiftStrategy(BaseStrategy):
         return 'neutral'
 
     def scan(self, symbol, timeframe, candles, indicators, sr_zones, htf_candles=None):
-        from app.core.fractals import build_swing_map
+        from app.strategies.archive.smc_v1.fractals import build_swing_map
 
         if len(candles) < self.LOOKBACK + self.PIVOT_BARS: return None
         window = candles[-(self.LOOKBACK + self.PIVOT_BARS):]

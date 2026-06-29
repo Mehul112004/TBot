@@ -17,7 +17,7 @@ import pandas as pd
 from typing import Optional
 
 from app.core.indicators import compute_volume_ma
-from app.core.fractals import build_swing_list, determine_trend_from_swings
+from app.strategies.archive.smc_v1.fractals import build_swing_list, determine_trend_from_swings
 
 
 # ── ChoCh / BOS Detection ──

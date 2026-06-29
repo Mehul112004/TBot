@@ -29,7 +29,7 @@ Risk Management:
   - TP2: Fibonacci 1.618 extension
 
 Swing Detection:
-  Uses the fractal pivot algorithm from app.core.fractals with configurable
+  Uses the fractal pivot algorithm from app.strategies.archive.smc_v1.fractals with configurable
   pivot bar count for confirmed swing highs/lows.
 """
 
@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 
-from app.core.fractals import build_swing_map
+from app.strategies.archive.smc_v1.fractals import build_swing_map
 from app.core.base_strategy import BaseStrategy, Candle, Indicators, SetupSignal
 from app.core.base_strategy import safe_lt, safe_gt, safe_between
 
@@ -640,7 +640,7 @@ class FibonacciRetracementStrategy(BaseStrategy):
         Uses swing points from fractals.py extraction layer to compute
         Fibonacci levels, then scores confluence at the current candle.
         """
-        from app.core.fractals import detect_swing_points_df
+        from app.strategies.archive.smc_v1.fractals import detect_swing_points_df
 
         df = detect_swing_points_df(df, pivot_n=2, price_tolerance=0.001)
         n = len(df)

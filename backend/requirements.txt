@@ -14,3 +14,4 @@ gunicorn
 gevent
 pydantic
 google-genai
+statsmodels

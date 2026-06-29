@@ -8,7 +8,7 @@ against known DataFrames.
 import pandas as pd
 import numpy as np
 from app.core.events import detect_choch, detect_volume_climax, detect_liquidity_sweep
-from app.core.fractals import detect_swing_points_df, build_swing_list
+from app.strategies.archive.smc_v1.fractals import detect_swing_points_df, build_swing_list
 from tests.test_data_factory import _make_df, create_swing_trend_df, create_volume_climax_df
 
 
