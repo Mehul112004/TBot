@@ -1,5 +1,7 @@
 # Phase 5: Validation Strategy — Implementation Plan
 
+> **Historical design proposal.** Current simulator semantics and recommended research workflow are maintained in [backtesting documentation](../backtesting.md).
+
 ## Objective
 
 Prove the extraction layer is honest before trusting the strategy layer. Every extractor must be isolated, tested against known data, and manually verified against TradingView before any strategy consumes its output.

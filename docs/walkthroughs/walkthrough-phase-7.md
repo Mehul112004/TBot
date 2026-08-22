@@ -1,5 +1,7 @@
 # Phase 7: Backtesting Engine Walkthrough
 
+> **Historical walkthrough.** It describes an earlier implementation snapshot. Consult [the current backtesting model](../backtesting.md) for simulation semantics.
+
 I have successfully finished implementing the **Backtesting Engine** for the Crypto Signal Intelligence Platform.
 
 ## What Was Covered

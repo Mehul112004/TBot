@@ -1,24 +1,41 @@
-# Data Ingestion Logic
+# Data ingestion and candle lifecycle
 
-These functions handle acquiring raw OHLCV candle data from external sources and parsing it into a standardized format for the database.
+TBot operates on Binance USDT perpetual OHLCV stored in PostgreSQL. Historical data can be imported from Binance REST or a CSV; active live sessions warm themselves from REST and continue on the Binance WebSocket.
 
-## `fetch_klines(symbol, interval, start_time, end_time)`
-*   **Location:** `app/utils/binance.py`
-*   **Description:** Fetches historical candlestick data from Binance's REST API.
-*   **How it Works:** It makes an HTTP GET request to the Binance `/api/v3/klines` endpoint. Because Binance limits responses to 1000 candles per request, this function uses a `while` loop to automatically paginate through the requested date range, updating the `startTime` parameter on each iteration. It sleeps briefly between requests to prevent rate limit violations.
-*   **Input:** 
-    *   `symbol` (str): e.g., 'BTCUSDT'
-    *   `interval` (str): e.g., '4h'
-    *   `start_time` (int): milliseconds Unix timestamp
-    *   `end_time` (int): milliseconds Unix timestamp
-*   **Output:** List of dictionaries containing correctly typed OHLCV values and a Python `datetime` object for `open_time`.
+## Sources
 
-## `parse_binance_csv(file_stream, symbol, timeframe)`
-*   **Location:** `app/utils/csv_parser.py`
-*   **Description:** Parses an uploaded CSV file containing raw Binance OHLCV data.
-*   **How it Works:** Uses the `pandas` library to load the CSV file into a DataFrame. It strips and lowercases column headers to robustly find required fields (`open_time`, `open`, `high`, `low`, `close`, `volume`). It handles `open_time` dynamically, parsing it correctly whether it's expressed as Unix milliseconds or as a string date (like '2023-01-01 00:00:00'). Data rows with `NaN` in required fields are dropped.
-*   **Input:** 
-    *   `file_stream` (file-like object): The uploaded CSV file stream.
-    *   `symbol` (str): The trading pair the CSV represents.
-    *   `timeframe` (str): The timeframe the CSV represents.
-*   **Output:** List of dictionaries identical in structure to the output of `fetch_klines()`. Raises a `ValueError` if the CSV is structurally invalid.
+| Source | Entry point | Behaviour |
+| --- | --- | --- |
+| Binance REST | `POST /api/data/import/binance` and scanner backfill | Paginates futures klines and upserts by symbol/timeframe/open time |
+| CSV | `POST /api/data/import/csv` | Normalises recognized headers, validates OHLCV, then upserts |
+| Binance WebSocket | `BinanceStreamManager` created per live session | Emits live prices/candles and a distinct closed-candle callback |
+
+`GET /api/data/candles` exposes stored data for charts/backtests. `GET /api/data/datasets` lists local coverage; `GET /api/data/symbols` can obtain the current Binance Futures universe as well as local symbols.
+
+## Finalized-candle rule
+
+The active strategy and indicator path is designed around finalized bars. `app/utils/data_utils.py` filters in-progress candles according to timeframe duration and supports an as-of boundary. `LiveScanner` invokes its normal strategy loop on the closed-candle callback, not on each price update.
+
+The scanner separately forwards in-progress candles to strategies that explicitly opt into `run_on_live_candle`; currently that distinction is used by `EMA Cross Alert`.
+
+## Live-session data flow
+
+1. Session start selects symbol/timeframes and starts a background warmup/top-up (at least the configured 400-candle window).
+2. The combined Binance stream reports price updates and candle events.
+3. A closed candle is persisted, temporal gaps are checked/fetched from REST, indicator cache is invalidated, and applicable S/R zones are refreshed before regular strategies run.
+4. A reconnect triggers a background backfill/top-up so persisted history remains the basis for subsequent calculations.
+
+Candles use the `(symbol, timeframe, open_time)` composite identity. The `is_closed` field distinguishes finalized database observations from an in-progress streamed bar.
+
+## CSV expectations
+
+The parser accepts Binance-shaped OHLCV exports and normalizes compatible headers. Required information is an open timestamp plus open, high, low, close, and volume. Timestamps can be epoch milliseconds or parseable datetimes. Validate a small import before relying on a large external file.
+
+## Related files
+
+- `backend/app/blueprints/data.py` — HTTP import/query handlers
+- `backend/app/utils/binance.py` — REST pagination and combined WebSocket client
+- `backend/app/utils/csv_parser.py` — header/data validation
+- `backend/app/utils/data_utils.py` — finalized/as-of DataFrame boundaries
+- `backend/app/models/db.py` — `Candle` persistence model
+- `backend/scripts/verify_candle_data.py` — local-versus-Binance inspection/optional repair utility

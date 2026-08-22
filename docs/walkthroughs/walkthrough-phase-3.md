@@ -1,5 +1,7 @@
 # Phase 3: Strategy Engine — Walkthrough
 
+> **Historical walkthrough.** Strategy names, paths, and interfaces can be phase-era. Consult [the current strategy catalog](../strategy-catalog.md) first.
+
 ## Summary
 
 Implemented the complete strategy engine layer for the Crypto Signal Intelligence Platform. This phase builds on top of the Phase 1 data layer and Phase 2 indicator engine to provide a pluggable framework where strategies consume indicators and S/R zones to produce `SetupSignal` objects.

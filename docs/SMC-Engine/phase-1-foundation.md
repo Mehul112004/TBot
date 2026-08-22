@@ -1,5 +1,7 @@
 # Phase 1: Foundation — mtf, swings, sessions
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Build the three deterministic, no-lookahead foundation modules that everything else depends on. These modules produce the per-candle context that `structure.py`, `fvgs.py`, `order_blocks.py` (Phase 2) and `liquidity.py` (Phase 3) consume.

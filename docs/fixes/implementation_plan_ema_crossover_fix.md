@@ -1,5 +1,7 @@
 # Fix EMA Crossover Strategy Issues (V2)
 
+> **Historical implementation plan.** It refers to the archived EMA Crossover strategy and an earlier code layout, not the current direct-alert `EMA Cross Alert` lifecycle. See [the strategy catalog](../strategy-catalog.md).
+
 This implementation plan details the steps required to resolve the 7 identified issues in the `ema_crossover.py` strategy, incorporating feedback to solidify the HTF checks, correctly establish SR zone entry-blocking, and rigorously handle Volume and TP conditions.
 
 ## User Review Required

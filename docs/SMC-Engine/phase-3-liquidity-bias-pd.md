@@ -1,5 +1,7 @@
 # Phase 3: Liquidity + Bias + Premium/Discount
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Close the three largest gaps from the v1 SMC engine:

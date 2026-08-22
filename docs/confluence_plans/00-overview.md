@@ -1,5 +1,7 @@
 # Confluence Engine Restructuring — Master Plan
 
+> **Historical design proposal.** It describes a target architecture, not a current feature inventory. Consult [the current architecture](../architecture.md) and [strategy catalog](../strategy-catalog.md) before resuming it.
+
 ## Purpose
 
 This document is the architectural blueprint for a major restructuring of the C_helper backend. The goal is to separate mathematical feature extraction from strategy logic, replacing rigid boolean AND-gate strategies with a weighted scoring confluence engine.

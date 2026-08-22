@@ -2,6 +2,8 @@
 
 This guide explains the four horizontal-level overlays on the TBot chart, what they mean, and how to read them together.
 
+**Implementation status (2026-08-22):** S/R zones and pivots are current engine-backed overlays. The FVG/OB layer is an on-the-fly chart overlay powered by the archived `smc_v1` helpers at `/api/sr-zones/smc-zones`; it is not the planned SMC v2 engine. Treat overlap as visual analysis context, not an automatic trade recommendation.
+
 ---
 
 ## The Four Layers (toggleable)
@@ -146,7 +148,7 @@ Only the "large" grain is shown (sparse, ~6 levels nearest to price). The "small
 ## 4. FVG / OB (Cyan — SMC theory)
 
 ### What they are
-**Fair Value Gaps (FVGs)**: 3-candle imbalances where price moved so fast it left a "gap" in the order book — price tends to return to fill these.  
+**Fair Value Gaps (FVGs)**: 3-candle imbalances where price moved so fast it left a "gap" in the order book — price tends to return to fill these.
 **Order Blocks (OBs)**: the last bullish/bearish candle before a strong move — institutional order origin points.
 
 ### How they differ from S/R

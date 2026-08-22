@@ -1,5 +1,7 @@
 # Phase 3: State Persistence & Data Integrity — Implementation Plan
 
+> **Historical design proposal.** Consult [architecture](../architecture.md) for the current ownership and persistence model.
+
 ## Objective
 
 Eliminate database bloat by adopting a Snapshot Pattern. Only write to the database when a signal fires or a threshold is breached. All market structure is computed in-memory during the scanner loop, not persisted as individual rows.

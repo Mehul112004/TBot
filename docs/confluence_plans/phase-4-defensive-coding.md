@@ -1,5 +1,7 @@
 # Phase 4: Defensive Coding Against Quantitative Traps — Implementation Plan
 
+> **Historical design proposal.** Preserve its research rationale, but verify its proposed modules against current source before implementing from it.
+
 ## Objective
 
 Prevent the 5 quantitative traps that silently corrupt signals. These defenses must be baked into Phase 1 from day one, not retrofitted after bugs are found.

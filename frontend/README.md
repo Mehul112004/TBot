@@ -1,73 +1,40 @@
-# React + TypeScript + Vite
+# TBot frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The frontend is a Vite + React + TypeScript dashboard for operating and inspecting the TBot backend. It does not calculate strategies, call LLM providers, or send Telegram messages itself; it presents the backend's REST and Server-Sent Event (SSE) interfaces.
 
-Currently, two official plugins are available:
+## Pages
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Route | Purpose |
+| --- | --- |
+| `/` | Import data from Binance/CSV and inspect stored datasets |
+| `/signal-feed` | Start or stop analysis sessions; view watching, confirmed, rejected, and outcome states |
+| `/charts` | Candlestick chart with indicator, S/R, pivot, psych-level, and legacy-SMC overlays |
+| `/backtest` | Configure a server-side backtest and inspect persisted runs/trades/equity data |
+| `/backtest-analyser` | Compare JSON backtest artifacts dropped into the browser |
+| `/llm-prompts` | Browse persisted LLM prompt/response logs |
+| `/price-alerts` | Create, view, and cancel independent price alerts |
 
-## React Compiler
+## Development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The API base URL is set through `VITE_API_BASE_URL`; if it is unset, the client uses `http://localhost:5001/api`.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Other scripts:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build
+npm run lint
 ```
+
+## Integration boundaries
+
+- `src/lib/api.ts` is the REST client and the first place to update when a backend endpoint changes.
+- `src/hooks/useSSE.ts` owns the EventSource connection for the live signal feed.
+- `src/pages/Charts/` and `src/components/Chart/` render market-data views; pricing/indicator calculation remains in the backend.
+- `src/pages/Backtest.tsx` operates the persisted backend backtester. `BacktestAnalyzer.tsx` is a local browser-side reader for saved JSON outputs.
+
+For the current end-to-end model, see [the repository architecture guide](../docs/architecture.md).

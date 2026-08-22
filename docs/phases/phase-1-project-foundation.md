@@ -1,5 +1,7 @@
 # Phase 1: Project Foundation & Data Layer
 
+> **Historical implementation plan.** This records the phase-era design and may name superseded infrastructure or interfaces. Use the current [documentation index](../README.md) for the running system.
+
 ## Goal
 Backend and frontend scaffolded, historical data importable, candle data queryable.
 

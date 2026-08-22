@@ -1,5 +1,7 @@
 # Phase 0: Pre-flight
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Before writing any SMC engine code, verify the environment, data availability, and prep the codebase for v1 archival. This phase has **zero new logic** — it is gates and prep.

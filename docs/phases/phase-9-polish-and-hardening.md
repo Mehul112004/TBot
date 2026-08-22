@@ -1,5 +1,7 @@
 # Phase 9: Polish & Hardening
 
+> **Historical planning material.** Items described here are not a statement that they exist today. See [operations](../operations.md) for current operational behaviour.
+
 ## Goal
 Platform is reliable, informative, and pleasant to use daily.
 

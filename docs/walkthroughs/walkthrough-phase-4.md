@@ -1,5 +1,7 @@
 # Phase 4: Live Analysis Engine — Walkthrough
 
+> **Historical walkthrough.** Session limits, component paths, and payload details can be phase-era. Consult [current live analysis](../logic/live_analysis.md) first.
+
 ## Summary
 
 Implemented the full Live Analysis Engine for the Crypto Signal Intelligence Platform. Users can now start real-time analysis sessions from the Signal Feed UI, selecting a symbol and strategies. The backend connects to Binance WebSocket streams, detects candle closes, runs strategies, and pushes watching card updates to the frontend via SSE.

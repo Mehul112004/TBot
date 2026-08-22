@@ -1,5 +1,7 @@
 # Phase 6: Telegram Notifications
 
+> **Historical implementation plan.** This records the phase-era design. Use [architecture](../architecture.md) and [operations](../operations.md) for the current delivery lifecycle.
+
 ## Goal
 Confirmed signals and outcome updates sent to Telegram automatically.
 

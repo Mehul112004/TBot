@@ -1,5 +1,7 @@
 # Phase 1: Feature Extraction Layer — Implementation Plan
 
+> **Historical design proposal.** The paths/modules described here are planned or phase-era, not an assertion of the current runtime. Consult [the documentation index](../README.md).
+
 ## Objective
 
 Strip all mathematical calculations out of `app/strategies/`. Strategies become pure logic gates and confidence scoring. All math moves to `app/core/` as a pure extraction layer.

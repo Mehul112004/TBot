@@ -1,5 +1,7 @@
 # Phase 7: Frontend — Chart UI for the new SMC engine
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Extend the chart UI in `frontend/src/pages/Charts/` to render all the new SMC layers from the v2 engine. The frontend already has a working chart (candles, EMA lines, S/R zones, v1 FVG/OB/event markers). This phase adds new layers without breaking the existing ones.

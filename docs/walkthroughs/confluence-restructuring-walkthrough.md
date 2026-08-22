@@ -1,5 +1,7 @@
 # Confluence Engine Restructuring — Changes Walkthrough & Verification Guide
 
+> **Historical walkthrough.** It describes a prior restructuring effort and may reference an older layout. Consult [the current architecture](../architecture.md) before resuming any work from it.
+
 ## Overview
 
 This walkthrough documents every file changed and every new file created across all 5 phases of the confluence engine restructuring. It also provides a step-by-step verification procedure to confirm the changes work end-to-end.

@@ -1,5 +1,7 @@
 # Phase 7: Backtesting Engine
 
+> **Historical implementation plan.** Read [the current backtesting model](../backtesting.md) for actual simulation semantics and artifact handling.
+
 ## Goal
 Any strategy can be backtested against historical data with full metrics and charts.
 

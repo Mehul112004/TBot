@@ -1,5 +1,7 @@
 # Phase 3: Strategy Engine & BaseStrategy Contract
 
+> **Historical implementation plan.** This records the phase-era design and may name superseded interfaces or strategies. Use the current [strategy catalog](../strategy-catalog.md) for the running registry.
+
 ## Goal
 Strategy system built. Built-in strategies implemented. Strategies produce SetupSignal objects.
 

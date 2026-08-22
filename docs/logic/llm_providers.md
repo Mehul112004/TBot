@@ -1,53 +1,31 @@
-# Modular LLM Provider System
+# LLM confirmation and providers
 
-## Overview
+The LLM is a bounded reviewer of a rule-generated candidate; it is not the continuous market scanner. Its work is performed asynchronously by the single-worker `LLMQueueManager` after a `WatchingSetup` is persisted.
 
-The backend uses a modular approach for interacting with Large Language Models (LLMs). This flexible architecture removes hardcoded dependencies on specific local or cloud inference setups (like LM Studio). Instead, it relies on an abstract Factory pattern, allowing you to seamlessly swap between various providers (e.g., LM Studio, Groq, OpenRouter) simply by modifying your environment file.
+## Decision contract
 
-## Architecture
+`LLMClient` requests JSON that validates against a Pydantic decision schema. The response contains a verdict (`CONFIRM`, `REJECT`, or `MODIFY`), reasoning, dimension scores, confidence, and optional modified stop/target levels. The prompt asks the model to consider trend, momentum, market structure, volume, price action, risk/reward, key levels, and counter-signals.
 
-The system resides in `backend/app/core/llm_providers/` and relies on three main components:
+For `CONFIRM`/`MODIFY`, the result becomes a `ConfirmedSignal`; `MODIFY` replaces the proposed levels. For `REJECT`, it becomes a `RejectedSignal`. Prompt/response data and parsed verdict are persisted in `LLMPromptLog` and exposed through `/api/signals/llm_logs`.
 
-1. **`BaseLLMProvider` (`base.py`)**: 
-   An abstract base class that enforces the interface structure for all inference methods, primarily requiring an `evaluate_prompt` implementation and a `ping_status` functionality lock-in.
+## Context builder
 
-2. **`OpenAICompatibleProvider` (`openai_compatible.py`)**: 
-   Since many local orchestrations (like LM Studio) and cloud inferences (like Groq, OpenRouter, and OpenAI) adopt the OpenAI JSON format (`/v1/chat/completions`), this class universally proxies traffic without needing custom, model-specific code variants. It leverages the standard payload layout consisting of an array of role-specified messages (`[{"role": "system", ...}, {"role": "user", ...}]`).
+`llm_context_builder.py` assembles candidate metadata/risk, indicators, volume, recent price action/classified candles, higher-timeframe context, and market data such as funding/open interest/session when available. It is a context-construction layer; the final decision is the provider's structured response filtered by the client schema/rules.
 
-3. **`Factory` (`factory.py`)**: 
-   The entry point for initialization. It intercepts requests for `get_llm_provider()` within the `LLMClient` and dynamically instances the chosen provider strategy dictation fetched from the `.env` settings.
+## Provider selection
 
-## Configuration Guide (`.env`)
+| `LLM_PROVIDER` | Provider implementation | Configuration family |
+| --- | --- | --- |
+| `lm_studio` (default) | Local OpenAI-compatible chat endpoint | `LLM_BASE_URL`, `LLM_MODEL`, optional `LLM_API_KEY` |
+| `vertex_ai` | Google Gen AI / Vertex AI client | `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`, generation controls, application credentials |
+| `groq`, `openrouter`, `openai` | OpenAI-compatible cloud endpoint | API base/model/key/generation controls |
 
-To switch providers, update the LLM configuration variables within the `backend/.env` file. The factory falls back to local `lm_studio` defaults if variables are omitted.
+Common controls include `LLM_MAX_TOKENS`, `LLM_TIMEOUT`, and `LLM_TEMPERATURE`. Vertex additionally supports max tokens, temperature, and a thinking-level setting. Keep actual keys, project IDs, chat IDs, and local endpoints in local/deployment configuration rather than documentation.
 
-```bash
-# LLM Provider Configuration
-LLM_PROVIDER=groq
-LLM_MAX_TOKENS=500
+The endpoint named `/api/signals/lm-studio-status` is retained for UI compatibility but delegates to the configured provider status mechanism, not only LM Studio.
 
-# Overrides (If you need to define explicit credentials when the default provider isn't detected)
-# LLM_API_KEY=your_key_here
-# LLM_API_URL=https://api.groq.com/openai/v1/chat/completions
-# LLM_MODEL=llama3-70b-8192
-```
+## Queue behaviour
 
-### Supported `LLM_PROVIDER` Key Defaults
-- `lm_studio` (Uses `http://localhost:1234/v1/chat/completions` and `google/gemma-4-e4b`)
-- `groq` (Uses `https://api.groq.com/openai/v1/chat/completions`, grabs `GROQ_API_KEY` locally, and selects `llama3-70b-8192`)
-- `openrouter` (Uses `https://openrouter.ai/api/v1/chat/completions` and `meta-llama/llama-3-70b-instruct`)
-- `openai` (Uses `https://api.openai.com/v1/chat/completions` and `gpt-4o`)
+The queue builds a fresh decision context, retrieves finalized higher-timeframe history, and may retry provider calls. It serializes confirmation work through one worker and has pacing/retry delays, so a watching candidate can remain visible while evaluation is pending. Telegram delivery is a separate queue after a result is persisted.
 
-## Scaling Integration (Adding Non-OpenAI APIs)
-
-If you ever wish to add an integration with a service that has a dramatically different payload schema (e.g., Anthropic's Claude API, Gemini Native API):
-
-1. **Create the Concrete Implementation**: Add a new file matching the format name (e.g., `app/core/llm_providers/anthropic_native.py`).
-2. **Inherit `BaseLLMProvider`**: Create a class `AnthropicProvider(BaseLLMProvider)` ensuring `evaluate_prompt(system_prompt, user_prompt)` compiles to logic suited for that specific library/SDK. Let it return `(text_content, raw_response)`.
-3. **Register in Factory**: Import your new module inside `factory.py`'s `get_llm_provider()` switch-case.
-
-```python
-# Inside factory.py
-if provider_type == "anthropic":
-    return AnthropicProvider(api_key=api_key, model=model, max_tokens=max_tokens)
-```
+When adjusting prompts, providers, parsing, or context fields, update LLM tests, the prompt-log UI expectations, [architecture](../architecture.md), and this guide.

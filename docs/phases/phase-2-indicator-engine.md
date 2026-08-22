@@ -1,5 +1,7 @@
 # Phase 2: Indicator Engine & S/R Zone Detection
 
+> **Historical implementation plan.** This records the phase-era design and may name superseded infrastructure or interfaces. Use the current [documentation index](../README.md) for the running system.
+
 ## Goal
 All indicators computed on stored candles. S/R zones detected and stored.
 

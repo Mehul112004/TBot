@@ -1,5 +1,7 @@
 # Phase 8: Strategy IDE
 
+> **Planned historical phase — not a current product feature.** The current frontend has no browser strategy IDE. See [the documentation index](../README.md) for current scope.
+
 ## Goal
 Custom strategies can be written in the browser, saved, and hot-loaded into the live engine.
 

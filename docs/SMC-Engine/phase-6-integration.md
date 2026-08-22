@@ -1,5 +1,7 @@
 # Phase 6: Integration — pre_process, /api/smc/engine, v1 archival
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Wire the SMC engine into the existing codebase:

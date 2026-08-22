@@ -1,5 +1,7 @@
 # Phase 2: Structure + Zones — BOS, CHoCH, MSS, FVGs, Order Blocks
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Reimplement the v1 BoS/CHoCH engines (from archived `events.py` and `market_structure.py`) as a single, cleaner `structure.py`, then build on the Phase 1 foundation to add **multi-slot FVGs with fill %** (`fvgs.py`) and **multi-slot Order Blocks with mitigation ledger** (`order_blocks.py`).

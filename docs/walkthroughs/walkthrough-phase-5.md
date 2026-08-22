@@ -1,5 +1,7 @@
 # Phase 5: LLM Confirmation Pipeline Completed
 
+> **Historical walkthrough.** The named local model/provider is not the current configuration contract. Consult [current LLM provider documentation](../logic/llm_providers.md) first.
+
 I've successfully implemented Phase 5 of the Crypto Signal Intelligence Platform!
 The platform now filters reactive and conditional strategy triggers by asynchronously evaluating them through your local LM Studio instance using the **qwen/qwen3.5-9b** model.
 

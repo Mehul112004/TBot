@@ -1,5 +1,7 @@
 # SMC Engine v2.0 — Research-Grade Implementation
 
+> **Future design, not a completed runtime engine (status reviewed 2026-08-22).** `backend/app/core/smc/` currently contains a parameter registry and unimplemented `SMContext`/`run_smc_analysis` public stubs. Current charts use legacy `app/strategies/archive/smc_v1/` through `/api/sr-zones/smc-zones`.
+
 ## Overview
 
 A multi-timeframe Smart Money Concepts (SMC) engine replacing the current fragmented SMC code (`market_structure.py`, `events.py`, `fractals.py`) with a single, audit-passing module that:

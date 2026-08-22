@@ -1,5 +1,7 @@
 # Phase 4: Live Analysis Engine & Watching Cards
 
+> **Historical implementation plan.** This records the phase-era design and may name superseded interfaces or limits. Use the current [live-analysis reference](../logic/live_analysis.md) for the running lifecycle.
+
 ## Goal
 Live market scanning running. Watching cards appearing in the UI.
 

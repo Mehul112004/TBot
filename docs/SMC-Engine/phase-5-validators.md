@@ -1,5 +1,7 @@
 # Phase 5: Validators — The Ship Gate
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Build the validators that *every* future change to the SMC engine must pass before it can ship. This is the most important phase of the project — the validators are what protect the engine from regressing to "Sharpe 5 in backtest, 0.5 in live" territory.

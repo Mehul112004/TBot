@@ -1,5 +1,7 @@
 # Phase 4: Engine Orchestrator — context.py, engine.py
 
+> **Future SMC v2 design.** This phase plan is not a record of completed runtime modules; see [the SMC design status](README.md).
+
 ## Goal
 
 Wire the 8 modules from Phases 1-3 into a single public API: `run_smc_analysis(df_15m, htf_data) -> df_enriched`. Also produce a per-bar `SMContext` frozen dataclass that strategies consume for clean, immutable per-bar reads.

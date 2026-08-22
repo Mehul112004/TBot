@@ -1,5 +1,7 @@
 # Phase 2: Generalized Confluence Engine — Implementation Plan
 
+> **Historical design proposal.** A generic confluence engine is not the current live strategy interface. Consult [the strategy catalog](../strategy-catalog.md).
+
 ## Objective
 
 Transform `BaseStrategy` from a bare abstract class into a feature-aware orchestrator. Replace rigid boolean AND-gate strategy logic with weighted scoring matrices. Solve the "0 Trades Curse of Dimensionality" where requiring 5 simultaneous conditions produces near-zero signals.
