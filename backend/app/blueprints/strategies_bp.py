@@ -53,6 +53,10 @@ def get_strategy(name):
         'version': strategy.version,
         'enabled': registry.is_enabled(name),
         'min_confidence': strategy.min_confidence,
+        'supports_historical_backtest': (
+            strategy.supports_historical_backtest
+            and 'sr' not in strategy.required_features
+        ),
     }), 200
 
 

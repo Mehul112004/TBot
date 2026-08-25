@@ -38,6 +38,7 @@ class EMACrossAlert(BaseStrategy):
     allowed_regimes = []
     required_features = ['rsi', 'fvg', 'ob', 'sr']
     run_on_live_candle = True
+    supports_historical_backtest = False
 
     _last_alert = {}
     _alert_cooldown_hours = 4

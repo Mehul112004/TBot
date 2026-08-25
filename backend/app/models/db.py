@@ -298,6 +298,7 @@ class BacktestRun(db.Model):
     end_date = db.Column(db.DateTime(timezone=True), nullable=False)
     initial_capital = db.Column(db.Float, nullable=False)
     risk_per_trade = db.Column(db.Float, nullable=False)         # fraction, e.g. 0.01
+    config_json = db.Column(db.Text, nullable=True)              # immutable engine/data manifest
 
     # Summary metrics (populated after run completes)
     total_trades = db.Column(db.Integer, default=0)
@@ -335,6 +336,7 @@ class BacktestRun(db.Model):
             'end_date': self.end_date.isoformat() if self.end_date else None,
             'initial_capital': self.initial_capital,
             'risk_per_trade': self.risk_per_trade,
+            'configuration': json.loads(self.config_json) if self.config_json else None,
             'total_trades': self.total_trades,
             'win_rate': self.win_rate,
             'total_pnl': self.total_pnl,

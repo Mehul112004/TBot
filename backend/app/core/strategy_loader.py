@@ -128,6 +128,18 @@ class StrategyRegistry:
                     'strategy_type': self._types.get(name, 'unknown'),
                     'enabled': self._enabled.get(name, True),
                     'min_confidence': instance.min_confidence,
+                    'supports_historical_backtest': (
+                        instance.supports_historical_backtest
+                        and 'sr' not in instance.required_features
+                    ),
+                    'historical_backtest_block_reason': (
+                        'Live-alert-only strategy'
+                        if not instance.supports_historical_backtest
+                        else (
+                            'Historical S/R feature path is not yet prefix-causal'
+                            if 'sr' in instance.required_features else None
+                        )
+                    ),
                 })
         return result
 

@@ -164,6 +164,10 @@ class BaseStrategy(ABC):
     # ── Live tick execution ──
     run_on_live_candle: bool = False  # Override True to run on every kline tick
 
+    # Set False for alert-only strategies whose implementation reads only the
+    # latest row, has side effects, or otherwise cannot emit a causal history.
+    supports_historical_backtest: bool = True
+
     # ── Feature declaration ──
     required_features: List[str] = []
     # Valid: 'ema', 'rsi', 'macd', 'bb', 'atr', 'adx', 'volume_ma',

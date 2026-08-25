@@ -60,6 +60,7 @@ def create_app(test_config=None):
             "ALTER TABLE confirmed_signals ADD COLUMN telegram_status VARCHAR(20) DEFAULT 'PENDING'",
             "ALTER TABLE confirmed_signals ADD COLUMN telegram_retries INTEGER DEFAULT 0",
             "ALTER TABLE confirmed_signals ADD COLUMN telegram_message_id VARCHAR(50)",
+            "ALTER TABLE backtest_runs ADD COLUMN config_json TEXT",
         ]:
             try:
                 db.session.execute(text(col_ddl))

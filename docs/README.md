@@ -10,6 +10,7 @@
 | [Operations and iteration guide](operations.md) | Local setup, configuration categories, session operations, safe change paths |
 | [Strategy catalog](strategy-catalog.md) | The live strategy set, strategy contract, LLM/direct-alert distinction, archive status |
 | [Backtesting model](backtesting.md) | Simulation semantics, artifacts, scripts, and research workflow |
+| [Signal quality roadmap](signal-quality-roadmap.md) | Proposed implementation plan for research validation, evidence snapshots, calibration, LLM guardrails, and manual-review feedback |
 | [API reference](logic/api_endpoints.md) | Current Flask REST and SSE surface |
 | [Data ingestion](logic/data_ingestion.md) | Binance/CSV data path and candle-finalization rules |
 | [Indicators and regime](logic/indicators.md) | Current indicator and market-regime calculation surface |
@@ -22,6 +23,7 @@
 | Location | Status | How to use it |
 | --- | --- | --- |
 | `docs/` and `docs/logic/` | Current | Working reference for the implementation reviewed on the date above. |
+| `docs/signal-quality-roadmap.md` | Proposed delivery roadmap | Implementation plan for the manual signal platform; it does not describe a live feature inventory. |
 | `docs/knowledge_base/sr_zones_and_pivots.md` | Current explanatory guide | UI-oriented explanation of chart overlays; it complements the engine reference. |
 | `docs/knowledge_base/overview.md`, `blueprint.md` | Redirects | Kept for old inbound links; point to the current references. |
 | `docs/phases/`, `docs/walkthroughs/`, `docs/fixes/` | Historical implementation records | Useful provenance, but descriptions can reflect the state at the time they were written. |

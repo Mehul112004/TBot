@@ -61,6 +61,12 @@ export default function Backtest() {
         {result && (
           <div className="flex items-center gap-3 text-sm text-slate-400">
             <span>{result.candle_count.toLocaleString()} candles</span>
+            {result.warmup_candle_count !== undefined && (
+              <>
+                <span className="text-slate-600">·</span>
+                <span>{result.warmup_candle_count.toLocaleString()} warm-up</span>
+              </>
+            )}
             <span className="text-slate-600">·</span>
             <span>{result.trade_count} trades</span>
           </div>

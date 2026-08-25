@@ -8,6 +8,7 @@ export interface BacktestConfig {
   strategy_names: string[];
   initial_capital: number;
   risk_per_trade: number; // percentage, e.g. 1.0 = 1%
+  slippage_bps: number; // all-in execution cost per side
 }
 
 export interface BacktestMetrics {
@@ -62,6 +63,14 @@ export interface BacktestResult {
   trades: BacktestTrade[];
   trade_count: number;
   candle_count: number;
+  warmup_candle_count?: number;
+  signal_count?: number;
+  simulation_audit?: {
+    input_signals: number;
+    accepted_trades: number;
+    rejections: Record<string, number>;
+  } | null;
+  configuration?: Record<string, unknown>;
   error?: string;
 }
 
@@ -74,6 +83,7 @@ export interface BacktestRunSummary {
   end_date: string;
   initial_capital: number;
   risk_per_trade: number;
+  configuration?: Record<string, unknown> | null;
   total_trades: number;
   win_rate: number | null;
   total_pnl: number | null;

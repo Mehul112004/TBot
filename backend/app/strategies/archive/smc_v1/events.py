@@ -75,8 +75,9 @@ def detect_choch(
 
     # Process each candle where enough structure exists
     for i in range(pivot_bars * 2, n):
-        # Get swings up to this candle (excluding future)
-        visible_swings = [s for s in swings if s['index'] < i]
+        # A centered fractal is visible only after its right-hand confirmation
+        # bars have closed, not merely because its pivot index is in the past.
+        visible_swings = [s for s in swings if s['confirmed_at'] <= i]
         if len(visible_swings) < 4:
             continue
 
@@ -264,7 +265,7 @@ def detect_liquidity_sweep(
         return df
 
     for i in range(pivot_bars * 2, n):
-        visible_swings = [s for s in swings if s['index'] < i - 1]  # Not the same candle
+        visible_swings = [s for s in swings if s['confirmed_at'] < i]
         if len(visible_swings) < 2:
             continue
 

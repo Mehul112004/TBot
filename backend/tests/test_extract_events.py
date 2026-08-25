@@ -14,6 +14,22 @@ from tests.test_data_factory import _make_df, create_swing_trend_df, create_volu
 
 class TestChoChDetection:
 
+    def test_outputs_are_prefix_causal(self):
+        """Appending future candles must not rewrite any earlier event row."""
+        df = create_swing_trend_df('bullish')
+        full = detect_choch(df, pivot_bars=3)
+        event_cols = [
+            'event_choch_bullish', 'event_choch_bearish',
+            'event_bos_bullish', 'event_bos_bearish',
+        ]
+        for end in range(20, len(df) + 1, 5):
+            prefix = detect_choch(df.iloc[:end].copy(), pivot_bars=3)
+            pd.testing.assert_series_equal(
+                full.iloc[end - 1][event_cols],
+                prefix.iloc[-1][event_cols],
+                check_names=False,
+            )
+
     def test_no_choch_in_ranging_market(self):
         """ChoCh should NOT fire in ranging market without clear structure."""
         rows = []
@@ -163,3 +179,4 @@ class TestFractalDetection:
         for s in swings:
             assert s['type'] in ('high', 'low'), f"Invalid swing type: {s['type']}"
             assert isinstance(s['price'], float), f"Swing price not float: {type(s['price'])}"
+            assert s['confirmed_at'] == s['index'] + 3

@@ -1,24 +1,26 @@
 """
-Backtesting Engine v3.0
+Backtesting Engine v4.0
 
 Core engine for running strategies against historical data and computing
 performance metrics.
 
 Key design choices:
   - Next-bar-open entry (realistic fill, no lookahead)
-  - Cooldown between trades (no signal clustering)
-  - Vectorized trade outcome resolution (SL/TP hit detection)
+  - Single open position with cooldown after exit
+  - Entry-candle-aware, gap-aware outcome resolution
   - Same-bar conflict: SL wins (conservative)
-  - RR filter: trades with < 1.0 RR after slippage are rejected
+  - Net P&L/R metrics and time-based daily risk ratios
 """
 
 import json
+import hashlib
 import uuid
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.core.base_strategy import BaseStrategy, SetupSignal
+from app.core.data_utils import TIMEFRAME_MS
 from app.core.strategy_runner import StrategyRunner
 from app.models.db import db, Candle, BacktestRun, BacktestTrade
 
@@ -30,9 +32,90 @@ class BacktestEngine:
     """
 
     VALID_TIMEFRAMES = ['5m', '15m', '30m', '1h', '4h', '1d']  # Primary signal TFs
+    ENGINE_VERSION = '4.0.0'
+
+    @staticmethod
+    def _utc_naive_timestamp(value) -> pd.Timestamp:
+        """Normalize a timestamp to a comparable UTC-naive Timestamp."""
+        ts = pd.Timestamp(value)
+        if pd.isna(ts):
+            raise ValueError("Timestamp cannot be null")
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert('UTC').tz_localize(None)
+        return ts
+
+    @classmethod
+    def validate_candle_data(
+        cls,
+        candle_df: pd.DataFrame,
+        timeframe: str | None = None,
+        require_volume: bool = True,
+        check_gaps: bool = True,
+    ) -> pd.DataFrame:
+        """Validate and normalize OHLCV input, failing closed on corrupt data."""
+        required = ['open_time', 'open', 'high', 'low', 'close']
+        if require_volume:
+            required.append('volume')
+        missing = [col for col in required if col not in candle_df.columns]
+        if missing:
+            raise ValueError(f"Candle data is missing required columns: {missing}")
+        if candle_df.empty:
+            raise ValueError("Candle data is empty")
+
+        df = candle_df.copy()
+        parsed_times = pd.to_datetime(df['open_time'], errors='coerce', utc=True)
+        if parsed_times.isna().any():
+            raise ValueError("Candle data contains invalid open_time values")
+        df['open_time'] = parsed_times.dt.tz_localize(None)
+
+        if df['open_time'].duplicated().any():
+            duplicate = df.loc[df['open_time'].duplicated(), 'open_time'].iloc[0]
+            raise ValueError(f"Duplicate candle timestamp detected: {duplicate}")
+        if not df['open_time'].is_monotonic_increasing:
+            raise ValueError("Candle timestamps must be strictly increasing")
+
+        numeric_cols = ['open', 'high', 'low', 'close']
+        if require_volume:
+            numeric_cols.append('volume')
+        for col in numeric_cols:
+            values = pd.to_numeric(df[col], errors='coerce')
+            if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+                raise ValueError(f"Candle data contains non-finite {col} values")
+            df[col] = values.astype(float)
+
+        if (df[['open', 'high', 'low', 'close']] <= 0).any().any():
+            raise ValueError("OHLC prices must be positive")
+        if require_volume and (df['volume'] < 0).any():
+            raise ValueError("Candle volume cannot be negative")
+        if (df['high'] < df[['open', 'close']].max(axis=1)).any():
+            raise ValueError("Candle high is below its open or close")
+        if (df['low'] > df[['open', 'close']].min(axis=1)).any():
+            raise ValueError("Candle low is above its open or close")
+        if (df['high'] < df['low']).any():
+            raise ValueError("Candle high is below candle low")
+        if 'is_closed' in df.columns and not df['is_closed'].fillna(False).astype(bool).all():
+            raise ValueError("Candle data contains rows not marked closed")
+
+        if check_gaps and timeframe:
+            tf_ms = TIMEFRAME_MS.get(timeframe)
+            if tf_ms is None:
+                raise ValueError(f"Unknown timeframe: {timeframe}")
+            expected = pd.Timedelta(milliseconds=tf_ms)
+            deltas = df['open_time'].diff().iloc[1:]
+            bad = deltas != expected
+            if bad.any():
+                first_bad_pos = int(np.flatnonzero(bad.to_numpy())[0]) + 1
+                previous = df['open_time'].iloc[first_bad_pos - 1]
+                current = df['open_time'].iloc[first_bad_pos]
+                raise ValueError(
+                    f"Candle gap detected between {previous} and {current}; "
+                    f"expected {timeframe} spacing"
+                )
+
+        return df.reset_index(drop=True)
 
     # ═══════════════════════════════════════════════════════════════
-    #  Trade Simulation (Vectorized)
+    #  Trade Simulation
     # ═══════════════════════════════════════════════════════════════
 
     @staticmethod
@@ -41,14 +124,19 @@ class BacktestEngine:
         candle_df: pd.DataFrame,
         initial_capital: float,
         risk_pct: float,
-        trail_stop: bool = False,  # Disabled — trailing stops hurt trend-following strategies
-        slippage_bps: float = 10.0,  # Per-side slippage in basis points (10 = 0.1%)
+        trail_stop: bool = False,
+        slippage_bps: float = 10.0,
+        cooldown_bars: int = 5,
+        unfavorable_expiry_bars: int = 8,
+        favorable_expiry_bars: int = 24,
+        audit: dict | None = None,
     ) -> list[dict]:
         """
-        Resolve trade outcomes using vectorized pandas operations.
+        Resolve trade outcomes with a causal, single-position portfolio model.
 
-        For each signal, forward-scans from the entry bar to find which
-        price level (SL, TP1, TP2) is breached first.
+        Signals enter at the next bar's open. The entry candle is included in
+        outcome evaluation. Only one position may be active, and cooldown starts
+        after its exit, so later sizing never uses P&L that was unknown at entry.
 
         Same-bar conflict rule: If SL and TP are hit on the same candle,
         SL wins (conservative assumption).
@@ -58,273 +146,227 @@ class BacktestEngine:
             candle_df: Full OHLCV DataFrame sorted by open_time.
             initial_capital: Starting capital for position sizing.
             risk_pct: Fraction of capital risked per trade (e.g. 0.01 = 1%).
-            slippage_bps: Per-side slippage/fees in basis points (default 10).
-                          Applied to both entry and exit prices.
+            slippage_bps: All-in execution cost in basis points per side.
+            cooldown_bars: Closed bars required after an exit before re-entry.
+            unfavorable_expiry_bars: Maximum bars while price is unfavorable.
+            favorable_expiry_bars: Maximum bars while price is favorable.
 
         Returns:
             List of trade dicts with all fields needed for BacktestTrade.
         """
+        if audit is not None:
+            audit.clear()
+            audit.update({
+                'input_signals': len(signals),
+                'accepted_trades': 0,
+                'rejections': {},
+            })
+
+        def reject(reason: str):
+            if audit is not None:
+                rejections = audit['rejections']
+                rejections[reason] = rejections.get(reason, 0) + 1
+
         if not signals:
             return []
+        if trail_stop:
+            raise ValueError(
+                "Trailing-stop backtests are disabled: OHLC bars cannot resolve "
+                "the intrabar order required to update and hit a trailing stop"
+            )
+        if initial_capital <= 0:
+            raise ValueError("initial_capital must be positive")
+        if not 0 < risk_pct <= 1:
+            raise ValueError("risk_pct must be greater than 0 and at most 1")
+        if slippage_bps < 0:
+            raise ValueError("slippage_bps cannot be negative")
+        if cooldown_bars < 0:
+            raise ValueError("cooldown_bars cannot be negative")
+        if unfavorable_expiry_bars <= 0 or favorable_expiry_bars <= 0:
+            raise ValueError("Expiry bars must be positive")
 
+        candle_df = BacktestEngine.validate_candle_data(
+            candle_df,
+            require_volume=False,
+            check_gaps=False,
+        )
         trades = []
-        equity = initial_capital  # Track running equity for compounding position sizing
-        slip_frac = slippage_bps / 10000.0  # Convert bps to fraction
+        equity = round(float(initial_capital), 2)
+        slip_frac = slippage_bps / 10000.0
+        opens = candle_df['open'].to_numpy(dtype=float)
         highs = candle_df['high'].values
         lows = candle_df['low'].values
         closes = candle_df['close'].values
-        times = candle_df['open_time'].values
+        times = candle_df['open_time'].tolist()
 
-        # Build a time→index lookup for fast entry bar resolution
-        time_index = {}
-        for i, t in enumerate(times):
-            ts = pd.Timestamp(t)
-            time_index[ts] = i
+        time_index = {pd.Timestamp(t).value: i for i, t in enumerate(times)}
 
-        # Position management: track the bar index where the last trade was entered.
-        # Skip signals within COOLDOWN_BARS of any open trade.
-        COOLDOWN_BARS = 5
-        last_entry_bar = -COOLDOWN_BARS  # enough back to allow first signal
+        # Highest-confidence candidate wins when multiple strategies fire on the
+        # same bar. This removes dependence on caller-provided strategy order.
+        resolved_signals = []
+        for order, signal in enumerate(signals):
+            if signal.timestamp is None:
+                raise ValueError(f"Signal from {signal.strategy_name} has no timestamp")
+            signal_time = BacktestEngine._utc_naive_timestamp(signal.timestamp)
+            confidence = float(signal.confidence or 0.0)
+            resolved_signals.append((signal_time, -confidence, signal.strategy_name, order, signal))
+        resolved_signals.sort(key=lambda item: item[:4])
 
-        for trade_num, signal in enumerate(signals, start=1):
-            entry = signal.entry or signal.timestamp
-            sl = signal.sl
-            tp1 = signal.tp1
-            tp2 = signal.tp2
+        next_allowed_entry_idx = 0
 
-            if entry is None or sl is None or tp1 is None or tp2 is None:
+        for sig_time, _, _, _, signal in resolved_signals:
+            if signal.entry is None or signal.sl is None or signal.tp1 is None or signal.tp2 is None:
+                reject('missing_levels')
                 continue
 
-            # Find entry bar index
-            sig_time = pd.Timestamp(signal.timestamp)
-            entry_idx = time_index.get(sig_time)
+            entry_idx = time_index.get(sig_time.value)
             if entry_idx is None:
-                # Find closest bar
-                sig_time_naive = sig_time.tz_localize(None) if sig_time.tzinfo else sig_time
-                diffs = np.abs(times.astype('datetime64[ns]') - np.datetime64(sig_time_naive))
-                entry_idx = int(np.argmin(diffs))
+                raise ValueError(
+                    f"Signal timestamp {sig_time.isoformat()} from "
+                    f"{signal.strategy_name} does not match a candle exactly"
+                )
 
-            # Skip if entry is at or after last bar
             if entry_idx >= len(candle_df) - 1:
+                reject('no_next_bar')
                 continue
 
-            # Skip if within cooldown window of last trade entry
-            if entry_idx < last_entry_bar + COOLDOWN_BARS:
-                continue
-
-            # Use next bar's open as entry (realistic: you can't trade the signal bar's close)
-            # Adjust SL/TP distances to maintain original risk structure
             next_idx = entry_idx + 1
-            original_entry = signal.entry if signal.entry else closes[entry_idx]
-            entry_price = float(candle_df.iloc[next_idx]['open'])
-
-            # Recalculate SL and TP using the shifted entry, preserving the original risk
-            original_risk = abs(original_entry - sl)
-            if signal.direction == 'LONG':
-                entry_slippage = entry_price - original_entry
-                sl = round(sl + entry_slippage, 8)
-                tp1 = round(tp1 + entry_slippage, 8) if tp1 else tp1
-                tp2 = round(tp2 + entry_slippage, 8) if tp2 else tp2
-            else:
-                entry_slippage = original_entry - entry_price
-                sl = round(sl - entry_slippage, 8)
-                tp1 = round(tp1 - entry_slippage, 8) if tp1 else tp1
-                tp2 = round(tp2 - entry_slippage, 8) if tp2 else tp2
-
-            # Minimum RR gate: skip trades where TP1 risk/reward falls below 1.0
-            # (slippage can compress RR below breakeven)
-            new_risk = abs(entry_price - sl)
-            if new_risk <= 0 or not tp1:
-                continue
-            tp1_rr = abs(tp1 - entry_price) / new_risk
-            if tp1_rr < 1.0:
+            if next_idx < next_allowed_entry_idx:
+                reject('position_open_or_post_exit_cooldown')
                 continue
 
-            # Forward slice from the bar AFTER the new entry
-            fwd_start = next_idx + 1
-            fwd_highs = highs[fwd_start:]
-            fwd_lows = lows[fwd_start:]
+            direction = signal.direction
+            if direction not in ('LONG', 'SHORT'):
+                raise ValueError(f"Invalid signal direction: {direction}")
 
-            # Mark cooldown start
-            last_entry_bar = entry_idx
-            fwd_times = times[fwd_start:]
+            levels = np.array(
+                [signal.entry, signal.sl, signal.tp1, signal.tp2],
+                dtype=float,
+            )
+            if not np.isfinite(levels).all() or (levels <= 0).any():
+                raise ValueError(f"Signal from {signal.strategy_name} has invalid price levels")
+            original_entry, sl, tp1, tp2 = levels.tolist()
+            if direction == 'LONG' and not (sl < original_entry < tp1 <= tp2):
+                raise ValueError(f"Invalid LONG level ordering from {signal.strategy_name}")
+            if direction == 'SHORT' and not (sl > original_entry > tp1 >= tp2):
+                raise ValueError(f"Invalid SHORT level ordering from {signal.strategy_name}")
 
-            if len(fwd_highs) == 0:
+            entry_price = float(opens[next_idx])
+
+            # Structural levels are facts from detection time. A next-open gap
+            # must change the available R:R; moving every level by the gap would
+            # invent support/targets that the strategy never observed. If entry
+            # has already crossed invalidation or TP1, the opportunity was missed.
+            if direction == 'LONG' and not (sl < entry_price < tp1):
+                reject('next_open_missed_or_invalidated_setup')
+                continue
+            if direction == 'SHORT' and not (sl > entry_price > tp1):
+                reject('next_open_missed_or_invalidated_setup')
                 continue
 
-            # Detect level hits
-            if signal.direction == 'LONG':
-                sl_hits = fwd_lows <= sl
-                tp1_hits = fwd_highs >= tp1
-                tp2_hits = fwd_highs >= tp2
-            else:  # SHORT
-                sl_hits = fwd_highs >= sl
-                tp1_hits = fwd_lows <= tp1
-                tp2_hits = fwd_lows <= tp2
-
-            # Find first bar where each level is hit (-1 if never)
-            sl_bar = int(np.argmax(sl_hits)) if sl_hits.any() else -1
-            tp1_bar = int(np.argmax(tp1_hits)) if tp1_hits.any() else -1
-            tp2_bar = int(np.argmax(tp2_hits)) if tp2_hits.any() else -1
-
-            # Validate: argmax returns 0 for all-False arrays; verify the hit actually occurred
-            if sl_bar == 0 and not sl_hits[0]:
-                sl_bar = -1
-            if tp1_bar == 0 and not tp1_hits[0]:
-                tp1_bar = -1
-            if tp2_bar == 0 and not tp2_hits[0]:
-                tp2_bar = -1
-
-            # Determine outcome: which level was hit first (with trailing stop)
-            outcome = None
-            exit_price = None
-            exit_bar_offset = len(fwd_times) - 1
-            exit_time = None
-
-            if trail_stop:
-                # ── Trailing stop logic ──
-                # Track best price since entry. At each 1R milestone, move SL.
-                best_price = entry_price
-                trailing_sl = sl  # Starts at initial SL
-                risk = abs(entry_price - sl)
-
-                for bar_idx in range(len(fwd_times)):
-                    bar_high = float(fwd_highs[bar_idx])
-                    bar_low = float(fwd_lows[bar_idx])
-
-                    if signal.direction == 'LONG':
-                        best_price = max(best_price, bar_high)
-                        profit_r = (best_price - entry_price) / risk if risk > 0 else 0
-
-                        # Trail SL at each 1R milestone (1R → BE, 2R → 1R, 3R → 2R)
-                        if profit_r >= 1.0:
-                            trailing_sl = max(trailing_sl, entry_price)  # Breakeven
-                        if profit_r >= 2.0:
-                            trailing_sl = max(trailing_sl, entry_price + 1.0 * risk)
-                        if profit_r >= 3.0:
-                            trailing_sl = max(trailing_sl, entry_price + 2.0 * risk)
-
-                        # Check if trailing SL is hit
-                        if bar_low <= trailing_sl:
-                            outcome = 'HIT_SL'
-                            exit_price = trailing_sl
-                            exit_bar_offset = bar_idx
-                            break
-                        # Check TP2 before TP1: if price blows through both on the
-                        # same bar, TP2 wins (strong momentum carried past TP1).
-                        if bar_high >= tp2:
-                            outcome = 'HIT_TP2'
-                            exit_price = tp2
-                            exit_bar_offset = bar_idx
-                            break
-                        if bar_high >= tp1:
-                            outcome = 'HIT_TP1'
-                            exit_price = tp1
-                            exit_bar_offset = bar_idx
-                            break
-                    else:  # SHORT
-                        best_price = min(best_price, bar_low)
-                        profit_r = (entry_price - best_price) / risk if risk > 0 else 0
-
-                        if profit_r >= 1.0:
-                            trailing_sl = min(trailing_sl, entry_price)
-                        if profit_r >= 2.0:
-                            trailing_sl = min(trailing_sl, entry_price - 1.0 * risk)
-                        if profit_r >= 3.0:
-                            trailing_sl = min(trailing_sl, entry_price - 2.0 * risk)
-
-                        if bar_high >= trailing_sl:
-                            outcome = 'HIT_SL'
-                            exit_price = trailing_sl
-                            exit_bar_offset = bar_idx
-                            break
-                        # Check TP2 before TP1: if price blows through both on the
-                        # same bar, TP2 wins (strong momentum carried past TP1).
-                        if bar_low <= tp2:
-                            outcome = 'HIT_TP2'
-                            exit_price = tp2
-                            exit_bar_offset = bar_idx
-                            break
-                        if bar_low <= tp1:
-                            outcome = 'HIT_TP1'
-                            exit_price = tp1
-                            exit_bar_offset = bar_idx
-                            break
-
-                if outcome is None:
-                    # No level hit with trailing — expire at end of data
-                    exit_price = float(closes[fwd_start + len(fwd_times) - 1])
-                    exit_time = pd.Timestamp(fwd_times[-1]).to_pydatetime()
-                    outcome = 'EXPIRED'
-                else:
-                    exit_price = float(exit_price)
-                    exit_time = pd.Timestamp(fwd_times[exit_bar_offset]).to_pydatetime()
-            else:
-                # Original fixed SL/TP logic
-                candidates = []
-                if sl_bar >= 0:
-                    candidates.append(('HIT_SL', sl_bar, sl))
-                if tp2_bar >= 0:
-                    candidates.append(('HIT_TP2', tp2_bar, tp2))
-                if tp1_bar >= 0:
-                    candidates.append(('HIT_TP1', tp1_bar, tp1))
-
-                if not candidates:
-                    exit_idx = len(fwd_times) - 1
-                    exit_price = float(closes[fwd_start + exit_idx])
-                    exit_time = pd.Timestamp(fwd_times[exit_idx]).to_pydatetime()
-                    outcome = 'EXPIRED'
-                else:
-                    priority = {'HIT_SL': 0, 'HIT_TP2': 1, 'HIT_TP1': 2}
-                    candidates.sort(key=lambda x: (x[1], priority.get(x[0], 99)))
-                    outcome, exit_bar_offset, exit_price = candidates[0]
-                    exit_price = float(exit_price)
-                    exit_time = pd.Timestamp(fwd_times[exit_bar_offset]).to_pydatetime()
-
-            # ── Position sizing (unadjusted risk distance) ──
-            # Slippage is a transaction cost applied ON TOP of the base pnl,
-            # not part of the risk structure. Mixing slippage into risk_distance
-            # causes position sizes to drift and SL losses to exceed intended risk.
-            equity_at_entry = equity  # snapshot before this trade's PnL
-            risk_amount = equity * risk_pct
             risk_distance = abs(entry_price - sl)
-            if risk_distance == 0:
-                position_size = 0
-            else:
-                position_size = risk_amount / risk_distance
+            if risk_distance <= 0:
+                reject('zero_risk_distance')
+                continue
+            tp1_rr = abs(tp1 - entry_price) / risk_distance
+            if tp1_rr < 1.0:
+                reject('tp1_below_one_r_at_fill')
+                continue
 
-            # Gross PnL (unadjusted prices)
-            if signal.direction == 'LONG':
+            outcome = 'EXPIRED'
+            exit_price = float(closes[-1])
+            exit_abs_idx = len(candle_df) - 1
+            exit_at_close = True
+
+            # Bar-by-bar processing makes the entry candle, gap handling,
+            # intrabar conflict rule, and expiry policy explicit.
+            for abs_idx in range(next_idx, len(candle_df)):
+                bar_open = float(opens[abs_idx])
+                bar_high = float(highs[abs_idx])
+                bar_low = float(lows[abs_idx])
+                bar_close = float(closes[abs_idx])
+
+                if direction == 'LONG':
+                    if bar_open <= sl:
+                        outcome, exit_price = 'HIT_SL', bar_open
+                    elif bar_open >= tp1:
+                        outcome = 'HIT_TP2' if bar_open >= tp2 else 'HIT_TP1'
+                        exit_price = bar_open
+                    elif bar_low <= sl and bar_high >= tp1:
+                        outcome, exit_price = 'HIT_SL', sl
+                    elif bar_low <= sl:
+                        outcome, exit_price = 'HIT_SL', sl
+                    elif bar_high >= tp1:
+                        outcome, exit_price = 'HIT_TP1', tp1
+                    else:
+                        outcome = None
+                else:
+                    if bar_open >= sl:
+                        outcome, exit_price = 'HIT_SL', bar_open
+                    elif bar_open <= tp1:
+                        outcome = 'HIT_TP2' if bar_open <= tp2 else 'HIT_TP1'
+                        exit_price = bar_open
+                    elif bar_high >= sl and bar_low <= tp1:
+                        outcome, exit_price = 'HIT_SL', sl
+                    elif bar_high >= sl:
+                        outcome, exit_price = 'HIT_SL', sl
+                    elif bar_low <= tp1:
+                        outcome, exit_price = 'HIT_TP1', tp1
+                    else:
+                        outcome = None
+
+                if outcome is not None:
+                    exit_abs_idx = abs_idx
+                    exit_at_close = False
+                    break
+
+                bars_held = abs_idx - next_idx + 1
+                favorable = (
+                    bar_close >= entry_price if direction == 'LONG'
+                    else bar_close <= entry_price
+                )
+                expiry_limit = favorable_expiry_bars if favorable else unfavorable_expiry_bars
+                if bars_held >= expiry_limit or abs_idx == len(candle_df) - 1:
+                    outcome = 'EXPIRED'
+                    exit_price = bar_close
+                    exit_abs_idx = abs_idx
+                    exit_at_close = True
+                    break
+
+            entry_datetime = pd.Timestamp(times[next_idx]).to_pydatetime()
+            exit_timestamp = pd.Timestamp(times[exit_abs_idx])
+            if exit_at_close:
+                tf_ms = TIMEFRAME_MS.get(signal.timeframe, 0)
+                exit_timestamp += pd.Timedelta(milliseconds=tf_ms)
+            exit_time = exit_timestamp.to_pydatetime()
+
+            equity_at_entry = equity
+            risk_amount = equity * risk_pct
+            position_size = risk_amount / risk_distance
+
+            if direction == 'LONG':
                 gross_pnl = position_size * (exit_price - entry_price)
             else:
                 gross_pnl = position_size * (entry_price - exit_price)
 
-            # Transaction costs: per-side slippage on entry + exit notional
             slippage_cost = position_size * slip_frac * (entry_price + exit_price)
-
-            pnl = gross_pnl - slippage_cost
-            pnl_pct = (pnl / equity) * 100 if equity > 0 else 0
-
-            # Update running equity for next trade's position sizing
-            equity += pnl
-
-            # R/R achieved (gross, based on unadjusted prices before costs)
-            if risk_distance > 0:
-                rr_ratio = gross_pnl / risk_amount
-            else:
-                rr_ratio = 0
-
-            # Duration — entry is at next bar's open (realistic fill model)
-            entry_datetime = pd.Timestamp(times[next_idx]).to_pydatetime()
+            pnl = round(float(gross_pnl - slippage_cost), 2)
+            pnl_pct = (pnl / equity_at_entry) * 100 if equity_at_entry > 0 else 0
+            rr_ratio = pnl / risk_amount if risk_amount > 0 else 0
             duration_mins = (exit_time - entry_datetime).total_seconds() / 60.0
 
+            # Use the same cent-rounded P&L for compounding, persistence, and the
+            # equity curve so all reported views reconcile exactly.
+            equity = round(equity + pnl, 2)
+            next_allowed_entry_idx = exit_abs_idx + cooldown_bars + 1
+
             trades.append({
-                'trade_number': trade_num,
+                'trade_number': len(trades) + 1,
                 'entry_time': entry_datetime,
                 'exit_time': exit_time,
                 'symbol': signal.symbol,
                 'timeframe': signal.timeframe,
-                'direction': signal.direction,
+                'direction': direction,
                 'strategy_name': signal.strategy_name,
                 'confidence': signal.confidence,
                 'entry_price': float(entry_price),
@@ -333,13 +375,18 @@ class BacktestEngine:
                 'tp2_price': float(tp2),
                 'exit_price': float(exit_price),
                 'outcome': outcome,
-                'pnl': round(float(pnl), 2),
+                'pnl': pnl,
                 'pnl_pct': round(float(pnl_pct), 4),
                 'rr_ratio': round(float(rr_ratio), 4),
                 'duration_mins': round(float(duration_mins), 2),
                 'equity_at_entry': round(float(equity_at_entry), 2),
                 'notes': signal.notes,
             })
+            if audit is not None:
+                audit['accepted_trades'] = len(trades)
+
+            if equity <= 0:
+                break
 
         return trades
 
@@ -390,6 +437,16 @@ class BacktestEngine:
                 'value': round(equity, 2),
             })
 
+        # Carry realized equity to the end of the evaluation window. This is
+        # required for time-based daily returns instead of per-trade annualizing.
+        end_time = pd.Timestamp(candle_df['open_time'].iloc[-1])
+        last_curve_time = BacktestEngine._utc_naive_timestamp(curve[-1]['time'])
+        if end_time > last_curve_time:
+            curve.append({
+                'time': end_time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'value': round(equity, 2),
+            })
+
         return curve
 
     # ---------- Metrics Calculator ----------
@@ -401,8 +458,9 @@ class BacktestEngine:
         equity_curve: list[dict],
     ) -> dict:
         """
-        Compute all summary performance metrics from trade results.
-        Sharpe/Sortino are annualized using actual trade frequency.
+        Compute summary metrics from net (after-cost) trade results.
+        Sharpe/Sortino use calendar-daily realized-equity returns (crypto trades
+        365 days/year); they are not annualized from irregular trade frequency.
 
         Returns dict with: total_trades, win_rate, total_pnl, total_pnl_pct,
         sharpe_ratio, sortino_ratio, max_drawdown, max_drawdown_pct,
@@ -423,40 +481,41 @@ class BacktestEngine:
         pnl_array = np.array(pnls, dtype=float)
 
         total_trades = len(trades)
-        winners = sum(1 for t in trades if t['outcome'] in ('HIT_TP1', 'HIT_TP2'))
+        # A target label is not necessarily a profitable trade after costs.
+        # Win rate therefore follows net P&L, which is what the account realizes.
+        winners = int(np.sum(pnl_array > 0))
         win_rate = (winners / total_trades) * 100 if total_trades > 0 else 0
 
         total_pnl = float(np.sum(pnl_array))
         total_pnl_pct = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0
 
-        # ── Annualization factor from actual trade frequency ──
-        # Using √252 on per-trade returns is only valid for daily returns.
-        # Instead, compute trades-per-year from the actual backtest duration.
-        ann_factor = 1.0
-        if len(trades) >= 2:
-            first_entry = trades[0].get('entry_time')
-            last_exit = trades[-1].get('exit_time')
-            if first_entry and last_exit:
-                total_days = (last_exit - first_entry).total_seconds() / 86400.0
-                if total_days > 0:
-                    trades_per_year = len(trades) / (total_days / 365.25)
-                    ann_factor = np.sqrt(trades_per_year)
+        daily_returns = np.array([], dtype=float)
+        if equity_curve and all('time' in point for point in equity_curve):
+            curve_df = pd.DataFrame(equity_curve)
+            curve_df['time'] = pd.to_datetime(curve_df['time'], errors='coerce', utc=True)
+            curve_df['value'] = pd.to_numeric(curve_df['value'], errors='coerce')
+            curve_df = curve_df.dropna().sort_values('time')
+            if len(curve_df) >= 2:
+                daily_equity = (
+                    curve_df.set_index('time')['value']
+                    .groupby(level=0).last()
+                    .resample('1D').last().ffill()
+                )
+                daily_returns = daily_equity.pct_change().dropna().to_numpy(dtype=float)
 
-        # Sharpe Ratio (annualized by actual trade frequency)
-        if len(pnl_array) > 1 and np.std(pnl_array) > 0:
-            returns = pnl_array / initial_capital
-            sharpe = float(np.mean(returns) / np.std(returns) * ann_factor)
+        ann_factor = np.sqrt(365.25)
+        if len(daily_returns) > 1 and np.std(daily_returns) > 0:
+            sharpe = float(np.mean(daily_returns) / np.std(daily_returns) * ann_factor)
         else:
             sharpe = 0.0
 
-        # Sortino Ratio (annualized, only downside deviation)
-        if len(pnl_array) > 1:
-            returns = pnl_array / initial_capital
-            negative_returns = returns[returns < 0]
-            if len(negative_returns) > 0 and np.std(negative_returns) > 0:
-                sortino = float(np.mean(returns) / np.std(negative_returns) * ann_factor)
-            else:
-                sortino = float(np.mean(returns) * ann_factor) if np.mean(returns) > 0 else 0.0
+        if len(daily_returns) > 1:
+            downside = np.minimum(daily_returns, 0.0)
+            downside_deviation = float(np.sqrt(np.mean(np.square(downside))))
+            sortino = (
+                float(np.mean(daily_returns) / downside_deviation * ann_factor)
+                if downside_deviation > 0 else 0.0
+            )
         else:
             sortino = 0.0
 
@@ -466,7 +525,13 @@ class BacktestEngine:
             peaks = np.maximum.accumulate(values)
             drawdowns = peaks - values
             max_dd = float(np.max(drawdowns))
-            max_dd_pct = float((max_dd / np.max(peaks)) * 100) if np.max(peaks) > 0 else 0.0
+            drawdown_pct = np.divide(
+                drawdowns,
+                peaks,
+                out=np.zeros_like(drawdowns),
+                where=peaks > 0,
+            )
+            max_dd_pct = float(np.max(drawdown_pct) * 100)
         else:
             max_dd = 0.0
             max_dd_pct = 0.0
@@ -481,8 +546,12 @@ class BacktestEngine:
         if profit_factor == float('inf'):
             profit_factor = 999.99
 
-        # Average R/R for winners
-        winner_rr = [t.get('rr_ratio', 0) or 0 for t in trades if t['outcome'] in ('HIT_TP1', 'HIT_TP2')]
+        # Average net R for profitable trades.
+        winner_rr = [
+            t.get('rr_ratio', 0) or 0
+            for t in trades
+            if (t.get('pnl', 0) or 0) > 0
+        ]
         avg_rr = float(np.mean(winner_rr)) if winner_rr else 0
         avg_winner_rr = avg_rr  # alias for clarity
 
@@ -530,15 +599,39 @@ class BacktestEngine:
         Execute a full backtest.
 
         Steps:
-          1. Load candles from DB
+          1. Load closed candles plus a strategy warm-up window from DB
           2. Run all strategies via StrategyRunner.scan_historical()
-             (S/R zones are computed per-strategy inside pre_process
-              with proper temporal masking — no global precomputation)
-          3. Simulate trades with next-bar-open entry + cooldown
-          4. Build equity curve and compute metrics
-          5. Persist to DB
+          3. Keep only signals in the requested evaluation window
+          4. Simulate a single-position portfolio with next-open entry
+          5. Build equity curve and compute metrics
+          6. Persist results plus a reproducibility manifest
         """
         run_id = str(uuid.uuid4())
+        warmup_bars = max(
+            (strategy.get_required_lookback() for strategy in strategies),
+            default=0,
+        )
+        configuration = {
+            'engine_version': cls.ENGINE_VERSION,
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'initial_capital': initial_capital,
+            'risk_pct': risk_pct,
+            'all_in_cost_bps_per_side': slippage_bps,
+            'warmup_bars': warmup_bars,
+            'cooldown_bars_after_exit': 5,
+            'unfavorable_expiry_bars': 8,
+            'favorable_expiry_bars': 24,
+            'entry_policy': 'next_bar_open_fixed_detection_levels_skip_if_missed',
+            'position_policy': 'single_open_position_highest_confidence_first',
+            'target_policy': 'tp1_first_unless_open_gaps_beyond_tp2',
+            'same_bar_conflict_policy': 'stop_first',
+            'strategy_versions': {
+                strategy.name: strategy.version for strategy in strategies
+            },
+        }
 
         # Create the run record
         run_record = BacktestRun(
@@ -550,60 +643,134 @@ class BacktestEngine:
             end_date=end_date,
             initial_capital=initial_capital,
             risk_per_trade=risk_pct,
+            config_json=json.dumps(configuration, sort_keys=True),
             status='RUNNING',
         )
         db.session.add(run_record)
         db.session.commit()
 
+        evaluation_count = 0
+        warmup_count = 0
         try:
-            # 1. Fetch candles from DB
+            if not strategies:
+                raise ValueError("At least one strategy is required")
+            incompatible = [
+                strategy.name for strategy in strategies
+                if timeframe not in strategy.timeframes
+            ]
+            if incompatible:
+                raise ValueError(
+                    f"Strategies do not support {timeframe}: {', '.join(incompatible)}"
+                )
+
+            tf_ms = TIMEFRAME_MS.get(timeframe)
+            if tf_ms is None:
+                raise ValueError(f"Unknown timeframe: {timeframe}")
+            warmup_start = start_date - timedelta(milliseconds=tf_ms * warmup_bars)
+
+            # 1. Fetch only rows explicitly marked closed. Timestamp finality is
+            # checked again below relative to the requested end_date.
             candles = (
                 Candle.query
                 .filter_by(symbol=symbol, timeframe=timeframe)
-                .filter(Candle.open_time >= start_date)
+                .filter(Candle.is_closed.is_(True))
+                .filter(Candle.open_time >= warmup_start)
                 .filter(Candle.open_time <= end_date)
                 .order_by(Candle.open_time.asc())
                 .all()
             )
 
-            if len(candles) < 50:
-                raise ValueError(
-                    f"Insufficient candle data: {len(candles)} candles "
-                    f"(need at least 50)"
-                )
+            if not candles:
+                raise ValueError("No closed candle data found for the requested run")
 
             data = [c.to_dict() for c in candles]
             candle_df = pd.DataFrame(data)
-            candle_df['open_time'] = pd.to_datetime(candle_df['open_time'])
-            candle_df = candle_df.sort_values('open_time').reset_index(drop=True)
+            candle_df['open_time'] = (
+                pd.to_datetime(candle_df['open_time'], errors='coerce', utc=True)
+                .dt.tz_localize(None)
+            )
+            start_ts = cls._utc_naive_timestamp(start_date)
+            end_ts = cls._utc_naive_timestamp(end_date)
+            candle_close_times = candle_df['open_time'] + pd.Timedelta(milliseconds=tf_ms)
+            candle_df = candle_df[candle_close_times <= end_ts]
+            candle_df = cls.validate_candle_data(
+                candle_df,
+                timeframe=timeframe,
+                require_volume=True,
+                check_gaps=True,
+            )
+
+            warmup_df = candle_df[candle_df['open_time'] < start_ts]
+            evaluation_df = candle_df[candle_df['open_time'] >= start_ts].reset_index(drop=True)
+            warmup_count = len(warmup_df)
+            evaluation_count = len(evaluation_df)
+
+            if warmup_count < warmup_bars:
+                raise ValueError(
+                    f"Insufficient warm-up data: {warmup_count} closed candles "
+                    f"before start_date (need {warmup_bars})"
+                )
+            min_evaluation_bars = max(
+                strategy.get_min_candles() for strategy in strategies
+            )
+            if evaluation_count < min_evaluation_bars:
+                raise ValueError(
+                    f"Insufficient evaluation data: {evaluation_count} closed candles "
+                    f"(need at least {min_evaluation_bars})"
+                )
+
+            analysis_df = pd.concat(
+                [warmup_df.tail(warmup_bars), evaluation_df],
+                ignore_index=True,
+            )
+
+            fingerprint_cols = ['open_time', 'open', 'high', 'low', 'close', 'volume']
+            fingerprint_values = pd.util.hash_pandas_object(
+                analysis_df[fingerprint_cols],
+                index=False,
+            ).values
+            configuration['data_fingerprint_sha256'] = hashlib.sha256(
+                fingerprint_values.tobytes()
+            ).hexdigest()
+            configuration['analysis_candle_count'] = len(analysis_df)
+            configuration['evaluation_candle_count'] = evaluation_count
+            run_record.config_json = json.dumps(configuration, sort_keys=True)
 
             # 2. Run strategies
-            # S/R zones are now computed per-strategy inside pre_process()
-            # with proper temporal masking via _formation_idx (no lookahead).
             signals = StrategyRunner.scan_historical(
                 strategies=strategies,
                 symbol=symbol,
                 timeframe=timeframe,
-                candle_df=candle_df,
+                candle_df=analysis_df,
+                strict=True,
             )
 
-            # Sort signals chronologically
-            signals.sort(key=lambda s: s.timestamp if s.timestamp else datetime.min)
+            # Remove warm-up-period signals. The warm-up rows exist only to
+            # initialize causal state and may never enter the reported sample.
+            signals = [
+                signal for signal in signals
+                if signal.timestamp is not None
+                and cls._utc_naive_timestamp(signal.timestamp) >= start_ts
+            ]
 
             # 3. Simulate trades
+            simulation_audit = {}
             trade_results = cls.simulate_trades(
                 signals=signals,
-                candle_df=candle_df,
+                candle_df=evaluation_df,
                 initial_capital=initial_capital,
                 risk_pct=risk_pct,
                 slippage_bps=slippage_bps,
+                audit=simulation_audit,
             )
+            configuration['simulation_audit'] = simulation_audit
+            run_record.config_json = json.dumps(configuration, sort_keys=True)
 
             # 4. Build equity curve
             equity_curve = cls.build_equity_curve(
                 trades=trade_results,
                 initial_capital=initial_capital,
-                candle_df=candle_df,
+                candle_df=evaluation_df,
             )
 
             # 5. Compute metrics
@@ -615,7 +782,7 @@ class BacktestEngine:
 
             # 6. Persist results
             run_record.status = 'COMPLETED'
-            run_record.completed_at = datetime.utcnow()
+            run_record.completed_at = datetime.now(timezone.utc)
             run_record.total_trades = metrics['total_trades']
             run_record.win_rate = metrics['win_rate']
             run_record.total_pnl = metrics['total_pnl']
@@ -666,14 +833,17 @@ class BacktestEngine:
                 'equity_curve': equity_curve,
                 'trades': trade_results,
                 'trade_count': len(trade_results),
-                'candle_count': len(candle_df),
+                'candle_count': evaluation_count,
+                'warmup_candle_count': warmup_count,
                 'signal_count': len(signals),
+                'simulation_audit': simulation_audit,
+                'configuration': configuration,
             }
 
         except Exception as e:
             run_record.status = 'FAILED'
             run_record.error_message = str(e)
-            run_record.completed_at = datetime.utcnow()
+            run_record.completed_at = datetime.now(timezone.utc)
             db.session.commit()
 
             return {
@@ -684,6 +854,9 @@ class BacktestEngine:
                 'equity_curve': [],
                 'trades': [],
                 'trade_count': 0,
-                'candle_count': 0,
+                'candle_count': evaluation_count,
+                'warmup_candle_count': warmup_count,
                 'signal_count': 0,
+                'simulation_audit': None,
+                'configuration': configuration,
             }

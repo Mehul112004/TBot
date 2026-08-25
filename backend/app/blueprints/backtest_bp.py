@@ -142,6 +142,10 @@ def run_backtest():
         'trades': serialized_trades,
         'trade_count': result['trade_count'],
         'candle_count': result['candle_count'],
+        'warmup_candle_count': result.get('warmup_candle_count', 0),
+        'signal_count': result.get('signal_count', 0),
+        'simulation_audit': result.get('simulation_audit'),
+        'configuration': result.get('configuration'),
     }), 200
 
 

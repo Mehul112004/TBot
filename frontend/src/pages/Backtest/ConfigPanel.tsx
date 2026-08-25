@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { BacktestConfig } from "../../types/backtest";
 import type { StrategyInfo } from "../../api/client";
 import { fetchSymbols } from "../../api/client";
@@ -34,7 +34,14 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [capital, setCapital] = useState("10000");
   const [risk, setRisk] = useState("1.0");
+  const [costBps, setCostBps] = useState("10.0");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const eligibleStrategies = useMemo(
+    () => strategies.filter(
+      (strategy) => strategy.supports_historical_backtest && strategy.timeframes.includes(timeframe),
+    ),
+    [strategies, timeframe],
+  );
 
   const toggleStrategy = (name: string) => {
     setSelectedStrategies((prev) =>
@@ -42,11 +49,18 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
     );
   };
 
+  const selectTimeframe = (nextTimeframe: string) => {
+    if (nextTimeframe !== timeframe) {
+      setSelectedStrategies([]);
+      setTimeframe(nextTimeframe);
+    }
+  };
+
   const selectAll = () => {
-    if (selectedStrategies.length === strategies.length) {
+    if (selectedStrategies.length === eligibleStrategies.length) {
       setSelectedStrategies([]);
     } else {
-      setSelectedStrategies(strategies.map((s) => s.name));
+      setSelectedStrategies(eligibleStrategies.map((s) => s.name));
     }
   };
 
@@ -75,6 +89,11 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
       setValidationError("Risk must be between 0.1% and 100%");
       return;
     }
+    const costNum = parseFloat(costBps);
+    if (isNaN(costNum) || costNum < 0 || costNum > 100) {
+      setValidationError("All-in cost must be between 0 and 100 bps per side");
+      return;
+    }
 
     onSubmit({
       symbol,
@@ -84,6 +103,7 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
       strategy_names: selectedStrategies,
       initial_capital: capNum,
       risk_per_trade: riskNum,
+      slippage_bps: costNum,
     });
   };
 
@@ -112,6 +132,22 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
         </select>
       </div>
 
+      <div>
+        <label className="block mb-1.5 font-medium text-slate-400 text-xs">
+          All-in execution cost (bps per side)
+        </label>
+        <input
+          type="number"
+          value={costBps}
+          onChange={(e) => setCostBps(e.target.value)}
+          min="0"
+          max="100"
+          step="0.5"
+          className="bg-slate-700 px-3 py-2 border border-slate-600 focus:border-emerald-500 rounded-lg w-full text-sm text-white focus:ring-2 focus:ring-emerald-500/50 outline-none"
+          id="backtest-cost-bps"
+        />
+      </div>
+
       {/* Timeframe */}
       <div>
         <label className="block mb-1.5 font-medium text-slate-400 text-xs">
@@ -121,7 +157,7 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
           {TIMEFRAMES.map((tf) => (
             <button
               key={tf}
-              onClick={() => setTimeframe(tf)}
+              onClick={() => selectTimeframe(tf)}
               className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${
                 timeframe === tf
                   ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
@@ -173,13 +209,13 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
             onClick={selectAll}
             className="text-emerald-400 text-xs hover:text-emerald-300 transition-colors"
           >
-            {selectedStrategies.length === strategies.length
+            {selectedStrategies.length === eligibleStrategies.length
               ? "Deselect All"
               : "Select All"}
           </button>
         </div>
         <div className="space-y-1 bg-slate-700/30 p-2 border border-slate-600 rounded-lg max-h-48 overflow-y-auto">
-          {strategies.map((strat) => (
+          {eligibleStrategies.map((strat) => (
             <label
               key={strat.name}
               className={`flex items-center gap-2.5 px-2.5 py-2 rounded-md cursor-pointer transition-colors ${
@@ -202,9 +238,9 @@ export default function ConfigPanel({ strategies, onSubmit, loading }: Props) {
               </div>
             </label>
           ))}
-          {strategies.length === 0 && (
+          {eligibleStrategies.length === 0 && (
             <p className="py-4 text-center text-slate-500 text-xs">
-              No strategies available
+              No causal historical strategies support this timeframe
             </p>
           )}
         </div>

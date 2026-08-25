@@ -140,16 +140,30 @@ def build_swing_list(
 
     Returns:
         List of dicts sorted by index:
-        [{'type': 'high'|'low', 'price': float, 'index': int}, ...]
+        [{'type': 'high'|'low', 'price': float, 'index': int,
+          'confirmed_at': int}, ...]
+
+        ``index`` is where the pivot occurred; ``confirmed_at`` is the first
+        candle on which the pivot is knowable after observing the right wing.
     """
     df = detect_swing_points_df(df, pivot_n)
     swings = []
 
     for i in df.index:
         if df.loc[i, 'swing_high']:
-            swings.append({'type': 'high', 'price': float(df.loc[i, 'swing_high_price']), 'index': int(i)})
+            swings.append({
+                'type': 'high',
+                'price': float(df.loc[i, 'swing_high_price']),
+                'index': int(i),
+                'confirmed_at': int(i) + pivot_n,
+            })
         if df.loc[i, 'swing_low']:
-            swings.append({'type': 'low', 'price': float(df.loc[i, 'swing_low_price']), 'index': int(i)})
+            swings.append({
+                'type': 'low',
+                'price': float(df.loc[i, 'swing_low_price']),
+                'index': int(i),
+                'confirmed_at': int(i) + pivot_n,
+            })
 
     return sorted(swings, key=lambda s: s['index'])
 

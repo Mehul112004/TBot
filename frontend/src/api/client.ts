@@ -254,6 +254,8 @@ export interface StrategyInfo {
   timeframes: string[];
   enabled: boolean;
   min_confidence: number;
+  supports_historical_backtest: boolean;
+  historical_backtest_block_reason?: string | null;
 }
 
 export const fetchStrategies = async (): Promise<StrategyInfo[]> => {

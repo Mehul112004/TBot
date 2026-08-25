@@ -45,6 +45,7 @@ from app import create_app
 from app.models.db import db, Candle
 from app.core.strategy_loader import registry
 from app.core.backtest_engine import BacktestEngine
+from app.core.data_utils import TIMEFRAME_MS
 from app.utils.binance import fetch_klines
 
 
@@ -119,7 +120,8 @@ def _build_output_path(args, date_str: str, project_root: str) -> tuple[str, str
 def sync_data_for_timeframe(symbol: str, timeframe: str, start_dt: datetime, end_dt: datetime):
     """
     Check if we have contiguous data from start_dt to end_dt.
-    If there's any gap (or no data), fetch the full 120 days.
+    If coverage is incomplete (or absent), fetch the requested evaluation plus
+    strategy warm-up range supplied by the caller.
     """
     result = db.session.query(
         func.min(Candle.open_time),
@@ -128,6 +130,7 @@ def sync_data_for_timeframe(symbol: str, timeframe: str, start_dt: datetime, end
     ).filter(
         Candle.symbol == symbol,
         Candle.timeframe == timeframe,
+        Candle.is_closed.is_(True),
         Candle.open_time >= start_dt,
         Candle.open_time <= end_dt
     ).first()
@@ -158,7 +161,7 @@ def sync_data_for_timeframe(symbol: str, timeframe: str, start_dt: datetime, end
                 needs_fetch = True
 
     if needs_fetch:
-        print(f"[{symbol} | {timeframe}] Gaps detected. Fetching full 120 days...")
+        print(f"[{symbol} | {timeframe}] Coverage issue detected. Fetching requested range...")
         start_ms = int(start_dt.timestamp() * 1000)
         end_ms = int(end_dt.timestamp() * 1000)
         # Map to Binance-compatible interval (e.g. '1D' -> '1d')
@@ -185,7 +188,8 @@ def sync_data_for_timeframe(symbol: str, timeframe: str, start_dt: datetime, end
                         'high': stmt.excluded.high,
                         'low': stmt.excluded.low,
                         'close': stmt.excluded.close,
-                        'volume': stmt.excluded.volume
+                        'volume': stmt.excluded.volume,
+                        'is_closed': stmt.excluded.is_closed,
                     }
                 )
                 db.session.execute(do_upsert)
@@ -317,7 +321,15 @@ def run_backtests():
 
                 if not args.no_sync:
                     try:
-                        sync_data_for_timeframe(symbol, tf, start_dt, end_dt)
+                        compatible = [s for s in enabled_strategies if tf in s.timeframes]
+                        warmup_bars = max(
+                            (s.get_required_lookback() for s in compatible),
+                            default=0,
+                        )
+                        sync_start = start_dt - timedelta(
+                            milliseconds=TIMEFRAME_MS[tf] * warmup_bars
+                        )
+                        sync_data_for_timeframe(symbol, tf, sync_start, end_dt)
                     except Exception as e:
                         print(f"Failed to sync data for {symbol} {tf}: {e}")
                         continue
@@ -349,6 +361,11 @@ def run_backtests():
                             "metrics": res.get("metrics"),
                             "trades": res.get("trades", []),
                             "equity_curve": res.get("equity_curve", []),
+                            "configuration": res.get("configuration"),
+                            "error": res.get("error"),
+                            "candle_count": res.get("candle_count", 0),
+                            "warmup_candle_count": res.get("warmup_candle_count", 0),
+                            "signal_count": res.get("signal_count", 0),
                         }
                         results["runs"].append(run_entry)
 

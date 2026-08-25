@@ -80,6 +80,7 @@ def get_finalized_candles(
         candles = (
             Candle.query
             .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter(Candle.is_closed.is_(True))
             .filter(Candle.open_time >= start_date)
             .filter(Candle.open_time <= end_date)
             .order_by(Candle.open_time.asc())
@@ -89,6 +90,7 @@ def get_finalized_candles(
         candles = (
             Candle.query
             .filter_by(symbol=symbol, timeframe=timeframe)
+            .filter(Candle.is_closed.is_(True))
             .order_by(Candle.open_time.desc())
             .limit(limit + 1)
             .all()
@@ -100,6 +102,11 @@ def get_finalized_candles(
         return pd.DataFrame()
 
     df = pd.DataFrame([c.to_dict() for c in candles])
+
+    # Query-level filtering is authoritative; this second guard protects tests,
+    # future alternate data providers, and legacy rows with NULL state.
+    if 'is_closed' in df.columns:
+        df = df[df['is_closed'].fillna(False).astype(bool)]
 
     # Guard: Drop unclosed candles (relative to as_of_ms, not wall clock)
     df['open_time'] = pd.to_datetime(df['open_time'])

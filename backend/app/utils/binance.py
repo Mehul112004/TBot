@@ -115,7 +115,9 @@ def fetch_klines(symbol: str, interval: str, start_time: int, end_time: int):
                 "high": float(row[2]),
                 "low": float(row[3]),
                 "close": float(row[4]),
-                "volume": float(row[5])
+                "volume": float(row[5]),
+                # Binance row[6] is the kline close timestamp in ms.
+                "is_closed": row[6] <= int(datetime.now(timezone.utc).timestamp() * 1000),
             })
             
         # Update current_start to be right after the last returned candle
@@ -338,4 +340,3 @@ class BinanceStreamManager:
     def is_running(self) -> bool:
         """Check if the stream is currently active."""
         return self._running
-

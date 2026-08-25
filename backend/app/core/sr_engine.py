@@ -141,7 +141,8 @@ class SREngine:
                     'zone_type': 'resistance',
                     'detection_method': 'swing',
                     'timestamp': pd.Timestamp(times[i]).to_pydatetime().replace(tzinfo=None),
-                    '_formation_idx': i,  # consumed by score_zone, not persisted (FIX-SR-4)
+                    # Centered swings become knowable only after the right wing.
+                    '_formation_idx': i + lookback,
                 })
 
             # Check for swing low — only flag the first occurrence of the min (FIX-SR-8)
@@ -153,7 +154,7 @@ class SREngine:
                     'zone_type': 'support',
                     'detection_method': 'swing',
                     'timestamp': pd.Timestamp(times[i]).to_pydatetime().replace(tzinfo=None),
-                    '_formation_idx': i,  # consumed by score_zone, not persisted (FIX-SR-4)
+                    '_formation_idx': i + lookback,
                 })
 
         return zones

@@ -106,7 +106,9 @@ class Burner920Strategy(BaseStrategy):
         hd_bear = pd.Series(False, index=df.index)
         low_v, high_v, rsi_v = df['low'].values, df['high'].values, rsi.values
 
-        # Single-pass: detect all swings once over the full series
+        # Single-pass detection is safe only when a pivot becomes visible after
+        # its ORDER right-hand bars have closed. Never backdate the divergence
+        # to the pivot candle: that would expose future prices to earlier rows.
         all_swing_lows = argrelextrema(low_v, np.less, order=ORDER)[0]
         all_swing_highs = argrelextrema(high_v, np.greater, order=ORDER)[0]
 
@@ -114,13 +116,19 @@ class Burner920Strategy(BaseStrategy):
         for j in range(1, len(all_swing_lows)):
             prev, curr = all_swing_lows[j - 1], all_swing_lows[j]
             if low_v[curr] > low_v[prev] and rsi_v[curr] < rsi_v[prev]:
-                hd_bull.iloc[max(0, curr - ORDER):curr + 1] = True
+                confirmed_at = curr + ORDER
+                if confirmed_at < len(df):
+                    hd_bull.iloc[confirmed_at:min(len(df), confirmed_at + ORDER + 1)] = True
 
         # Hidden bearish: lower high in price, higher high in RSI
         for j in range(1, len(all_swing_highs)):
             prev, curr = all_swing_highs[j - 1], all_swing_highs[j]
             if high_v[curr] < high_v[prev] and rsi_v[curr] > rsi_v[prev]:
-                hd_bear.iloc[max(0, curr - ORDER):curr + 1] = True
+                confirmed_at = curr + ORDER
+                if confirmed_at < len(df):
+                    hd_bear.iloc[confirmed_at:min(len(df), confirmed_at + ORDER + 1)] = True
+        df['hidden_divergence_bullish'] = hd_bull
+        df['hidden_divergence_bearish'] = hd_bear
         sg5 = (g1_bull & hd_bull) | (g1_bear & hd_bear)
 
         # ── Soft Gate 6: Market trap ──

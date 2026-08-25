@@ -109,6 +109,7 @@ class StrategyRunner:
         timeframe: str,
         candle_df: pd.DataFrame,
         min_confidence_override: Optional[float] = None,
+        strict: bool = True,
     ) -> List[SetupSignal]:
         """
         Backtest mode: Walk through the full candle dataset, running each
@@ -117,6 +118,9 @@ class StrategyRunner:
         where signal == 1.
 
         All strategies use the new v3 framework (generate_signals + gate-based).
+        Strict mode is the reliable default: a selected strategy either runs in
+        full or the backtest fails. Partial strategy sets must never be reported
+        as a successful experiment.
         """
         signals = []
 
@@ -125,6 +129,17 @@ class StrategyRunner:
                 continue
 
             try:
+                if not strategy.supports_historical_backtest:
+                    raise ValueError(
+                        f"{strategy.name} is live-alert-only and does not support "
+                        "historical backtesting"
+                    )
+                if 'sr' in strategy.required_features:
+                    raise ValueError(
+                        f"{strategy.name} requires S/R features whose batch "
+                        "historical pipeline is not yet prefix-causal"
+                    )
+
                 df = candle_df.copy()
                 df = strategy.pre_process(df, symbol=symbol, timeframe=timeframe)
 
@@ -172,13 +187,16 @@ class StrategyRunner:
                         signal.tp1 = tp1
                         signal.tp2 = tp2
 
-                    if signal.sl is not None and signal.tp1 is not None:
+                    if (signal.sl is not None and signal.tp1 is not None
+                            and signal.tp2 is not None):
                         signals.append(signal)
 
             except Exception as e:
+                if strict:
+                    raise RuntimeError(
+                        f"Historical scan failed for {strategy.name}: {e}"
+                    ) from e
                 print(f"[StrategyRunner] Error in historical scan for {strategy.name}: {e}")
-                import traceback
-                traceback.print_exc()
                 continue
 
         return signals
