@@ -66,6 +66,12 @@ class StrategyRunner:
 
             signal_idx = len(df) - 1
 
+            regime_strength_value = last.get('regime_strength')
+            regime_strength = (
+                float(regime_strength_value)
+                if pd.notna(regime_strength_value) else None
+            )
+
             signal = SetupSignal(
                 strategy_name=strategy.name,
                 symbol=symbol,
@@ -74,6 +80,10 @@ class StrategyRunner:
                 confidence=round(float(confidence), 4),
                 entry=entry,
                 regime=str(last.get('regime', 'UNKNOWN')),
+                volatility_regime=str(last.get('volatility_regime', 'UNKNOWN')),
+                structural_bias=str(last.get('structural_bias', 'UNKNOWN')),
+                regime_strength=regime_strength,
+                atr=atr_val if atr_val > 0 else None,
             )
 
             if atr_val > 0 and signal_idx >= 5:
@@ -170,6 +180,12 @@ class StrategyRunner:
                     regime = str(row.get('regime', 'UNKNOWN'))
                     signal_time = df.iloc[pos_idx]['open_time']
 
+                    regime_strength_value = row.get('regime_strength')
+                    regime_strength = (
+                        float(regime_strength_value)
+                        if pd.notna(regime_strength_value) else None
+                    )
+
                     signal = SetupSignal(
                         strategy_name=strategy.name,
                         symbol=symbol,
@@ -179,6 +195,10 @@ class StrategyRunner:
                         entry=entry,
                         timestamp=signal_time,
                         regime=regime,
+                        volatility_regime=str(row.get('volatility_regime', 'UNKNOWN')),
+                        structural_bias=str(row.get('structural_bias', 'UNKNOWN')),
+                        regime_strength=regime_strength,
+                        atr=atr_val if atr_val > 0 else None,
                     )
 
                     if atr_val > 0 and pos_idx >= 5:

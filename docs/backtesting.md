@@ -13,6 +13,7 @@ This document describes what the current engine simulates. It is deliberately se
 | Interactive UI | `frontend/src/pages/Backtest.tsx` | Starts/reviews API-backed tests |
 | File comparator | `frontend/src/pages/BacktestAnalyzer.tsx` | Browser-side comparison of dropped JSON result files |
 | Batch research | `backend/scripts/run_comprehensive_backtest.py` | Synchronises data and writes dated JSON output bundles |
+| Walk-forward research | `backend/app/research/`, `backend/scripts/run_walk_forward.py` | Sealed anchored OOS/holdout validation for one frozen strategy scope |
 
 ## Current execution semantics (engine 4.0.0)
 
@@ -72,6 +73,26 @@ python scripts/run_comprehensive_backtest.py --help
 
 The script can sync required Binance data unless instructed otherwise, execute a selected universe/strategy/timeframe set, and write a full JSON file plus a `_brief.json` summary under a date-named `backtests/` folder. Inspect its help/configuration before running it so a comparison records the intended universe, dates, capital, risk, and slippage.
 
+### Walk-forward validation v1
+
+Use this when evaluating whether one exact historical strategy/version is sufficiently stable to merit later manual-signal work. A manifest is immutable once sealed and fixes the strategy, symbol, timeframe, date coverage, risk, cost scenarios, fold sizes, bootstrap seed, family, and hypothesis. Previewing computes only coverage and chronology; it does not calculate outcomes.
+
+The v1 planner creates anchored, non-overlapping OOS tests with a 25-bar label horizon/purge and reserves the most recent region as an explicit final holdout. Candidate-quality replay evaluates every signal independently using the engine's same next-open/gap/stop-first/target/expiry rules. Alert-policy replay separately retains the existing one-position/cooldown behavior. Candidate outcomes include skips, detection-time regime/volatility/structural fields, ATR/regime strength, offered R, MFE/MAE, and after-cost net R. Candidate results never construct an equity curve.
+
+For each base, moderate, and severe per-side-cost scenario the system persists fold-level work, candidate outcomes, policy outcomes, primary slices, detection-day block-bootstrap mean-R intervals, Wilson win-rate intervals, and trial-family Benjamini–Hochberg adjusted p-values. It emits `PROVISIONAL` or `REJECT` after OOS; `PASS` is possible only after a deliberate holdout reveal. Sample sizes below the policy thresholds remain provisional rather than being described as a probability of success.
+
+From `backend/`:
+
+```bash
+python scripts/run_walk_forward.py --manifest path/to/experiment.json --preview
+python scripts/run_walk_forward.py --manifest path/to/experiment.json --execute
+python scripts/run_walk_forward.py --resume EXPERIMENT_ID
+python scripts/run_walk_forward.py --reveal-holdout EXPERIMENT_ID
+python scripts/run_walk_forward.py --export EXPERIMENT_ID
+```
+
+The dashboard route is `/research-validation`; the REST surface is `/api/research/experiments`. Execution is synchronous in the current v1, but persisted completed fold/scenario records are skipped on a retry, so an interrupted run can be resumed safely. Do not use this result to tune the manifest after its holdout has been revealed.
+
 ### Existing artifact convention
 
 The repository's `backtests/YYYYMMDD/` directories are dated snapshots from earlier research. A full file contains the detailed runs; a matching `_brief.json` contains combined headline metrics and run count. They are useful provenance and inputs to the Backtest Analyser, not baseline constants or guarantees for a current strategy version.
@@ -96,11 +117,11 @@ Use one hypothesis and a fixed experiment manifest per change.
 - A high historical score is an observation about that sample, not evidence that a signal will perform similarly live.
 - Engine 4.0 makes a single historical simulation causal and reproducible; it does **not** by itself make an optimized strategy out-of-sample evidence.
 
-These are documentation and research-practice guardrails, not a claim that the current engine already automates a full walk-forward or portfolio-validation framework.
+These are documentation and research-practice guardrails. The current validator automates a narrow anchored single-scope walk-forward workflow; it is not a portfolio-validation framework.
 
 ## Remaining research limitations
 
-- There is not yet an automated anchored/rolling walk-forward runner, untouched final holdout, multiple-testing correction, bootstrap confidence interval, or probability-of-backtest-overfitting report.
+- Anchored single-scope walk-forward, a sealed final holdout, candidate/policy separation, detection-day block bootstrap, and trial-family correction are implemented. Rolling/multi-asset execution, parameter sensitivity/leave-one-out/concentration diagnostics, and probability-of-backtest-overfitting are not.
 - The cost input is one all-in per-side basis-point assumption. It does not separately model maker/taker fees, spread, size-dependent impact, or perpetual funding.
 - OHLC replay is deliberately conservative for same-bar stop/target conflicts but cannot reconstruct the true intrabar path. Lower-timeframe replay is still required for higher fidelity.
 - The batch S/R feature pipeline still selects/scores zones using the full DataFrame. Historical strategies that require it fail closed until a per-prefix state machine replaces that implementation.

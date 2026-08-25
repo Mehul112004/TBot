@@ -476,3 +476,304 @@ class LLMPromptLog(db.Model):
             'parsed_verdict': self.parsed_verdict,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ── Walk-forward research records ──────────────────────────────────────────
+#
+# These models intentionally sit beside BacktestRun/BacktestTrade rather than
+# changing those historical records. A BacktestRun is one atomic simulation;
+# a research experiment is a versioned collection of chronological OOS folds,
+# cost scenarios, candidate outcomes, and one optional final holdout.
+
+
+class ResearchExperiment(db.Model):
+    __tablename__ = 'research_experiments'
+
+    id = db.Column(db.String(36), primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    hypothesis = db.Column(db.Text, nullable=False)
+    family_id = db.Column(db.String(120), nullable=False, index=True)
+    variant_id = db.Column(db.String(120), nullable=False)
+    manifest_json = db.Column(db.Text, nullable=False)
+    manifest_sha256 = db.Column(db.String(64), nullable=False, unique=True, index=True)
+
+    status = db.Column(db.String(40), nullable=False, default='SEALED')
+    decision = db.Column(db.String(20), nullable=True)  # PASS / PROVISIONAL / REJECT
+    evidence_grade = db.Column(db.String(20), nullable=True)
+    decision_reasons_json = db.Column(db.Text, nullable=True)
+    summary_json = db.Column(db.Text, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    engine_version = db.Column(db.String(30), nullable=False)
+    strategy_version = db.Column(db.String(50), nullable=False)
+    data_fingerprint_sha256 = db.Column(db.String(64), nullable=True)
+    holdout_revealed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    holdout_revealed_by = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now(), onupdate=db.func.now())
+
+    folds = db.relationship('ResearchFold', backref='experiment', lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self):
+        import json
+        return {
+            'id': self.id,
+            'name': self.name,
+            'hypothesis': self.hypothesis,
+            'family_id': self.family_id,
+            'variant_id': self.variant_id,
+            'manifest': json.loads(self.manifest_json) if self.manifest_json else {},
+            'manifest_sha256': self.manifest_sha256,
+            'status': self.status,
+            'decision': self.decision,
+            'evidence_grade': self.evidence_grade,
+            'decision_reasons': json.loads(self.decision_reasons_json) if self.decision_reasons_json else [],
+            'summary': json.loads(self.summary_json) if self.summary_json else None,
+            'error_message': self.error_message,
+            'engine_version': self.engine_version,
+            'strategy_version': self.strategy_version,
+            'data_fingerprint_sha256': self.data_fingerprint_sha256,
+            'holdout_revealed_at': self.holdout_revealed_at.isoformat() if self.holdout_revealed_at else None,
+            'holdout_revealed_by': self.holdout_revealed_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class ResearchFold(db.Model):
+    __tablename__ = 'research_folds'
+
+    id = db.Column(db.String(36), primary_key=True)
+    experiment_id = db.Column(db.String(36), db.ForeignKey('research_experiments.id'), nullable=False, index=True)
+    fold_number = db.Column(db.Integer, nullable=False)
+    kind = db.Column(db.String(20), nullable=False, default='OOS')  # OOS / HOLDOUT
+    train_start = db.Column(db.DateTime(timezone=True), nullable=True)
+    train_end = db.Column(db.DateTime(timezone=True), nullable=True)
+    purge_start = db.Column(db.DateTime(timezone=True), nullable=True)
+    purge_end = db.Column(db.DateTime(timezone=True), nullable=True)
+    test_start = db.Column(db.DateTime(timezone=True), nullable=False)
+    test_end = db.Column(db.DateTime(timezone=True), nullable=False)
+    status = db.Column(db.String(30), nullable=False, default='QUEUED')
+    data_fingerprint_sha256 = db.Column(db.String(64), nullable=True)
+    configuration_json = db.Column(db.Text, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    evaluations = db.relationship('ResearchEvaluationRun', backref='fold', lazy='dynamic', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.UniqueConstraint('experiment_id', 'kind', 'fold_number', name='uq_research_fold_number'),
+    )
+
+    def to_dict(self):
+        import json
+        return {
+            'id': self.id,
+            'experiment_id': self.experiment_id,
+            'fold_number': self.fold_number,
+            'kind': self.kind,
+            'train_start': self.train_start.isoformat() if self.train_start else None,
+            'train_end': self.train_end.isoformat() if self.train_end else None,
+            'purge_start': self.purge_start.isoformat() if self.purge_start else None,
+            'purge_end': self.purge_end.isoformat() if self.purge_end else None,
+            'test_start': self.test_start.isoformat() if self.test_start else None,
+            'test_end': self.test_end.isoformat() if self.test_end else None,
+            'status': self.status,
+            'data_fingerprint_sha256': self.data_fingerprint_sha256,
+            'configuration': json.loads(self.configuration_json) if self.configuration_json else None,
+            'error_message': self.error_message,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+class ResearchEvaluationRun(db.Model):
+    __tablename__ = 'research_evaluation_runs'
+
+    id = db.Column(db.String(36), primary_key=True)
+    experiment_id = db.Column(db.String(36), db.ForeignKey('research_experiments.id'), nullable=False, index=True)
+    fold_id = db.Column(db.String(36), db.ForeignKey('research_folds.id'), nullable=False, index=True)
+    track = db.Column(db.String(30), nullable=False)  # candidate_quality / alert_policy
+    cost_scenario = db.Column(db.String(80), nullable=False)
+    cost_bps_per_side = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default='QUEUED')
+    metrics_json = db.Column(db.Text, nullable=True)
+    uncertainty_json = db.Column(db.Text, nullable=True)
+    audit_json = db.Column(db.Text, nullable=True)
+    result_fingerprint_sha256 = db.Column(db.String(64), nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    outcomes = db.relationship('ResearchCandidateOutcome', backref='evaluation_run', lazy='dynamic', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.UniqueConstraint('fold_id', 'track', 'cost_scenario', name='uq_research_evaluation_scope'),
+    )
+
+    def to_dict(self):
+        import json
+        return {
+            'id': self.id,
+            'experiment_id': self.experiment_id,
+            'fold_id': self.fold_id,
+            'track': self.track,
+            'cost_scenario': self.cost_scenario,
+            'cost_bps_per_side': self.cost_bps_per_side,
+            'status': self.status,
+            'metrics': json.loads(self.metrics_json) if self.metrics_json else None,
+            'uncertainty': json.loads(self.uncertainty_json) if self.uncertainty_json else None,
+            'audit': json.loads(self.audit_json) if self.audit_json else None,
+            'result_fingerprint_sha256': self.result_fingerprint_sha256,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+class ResearchCandidateOutcome(db.Model):
+    __tablename__ = 'research_candidate_outcomes'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    experiment_id = db.Column(db.String(36), db.ForeignKey('research_experiments.id'), nullable=False, index=True)
+    fold_id = db.Column(db.String(36), db.ForeignKey('research_folds.id'), nullable=False, index=True)
+    evaluation_run_id = db.Column(db.String(36), db.ForeignKey('research_evaluation_runs.id'), nullable=False, index=True)
+    candidate_number = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # EVALUATED / SKIPPED
+    skip_reason = db.Column(db.String(100), nullable=True)
+
+    signal_time = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+    entry_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    exit_time = db.Column(db.DateTime(timezone=True), nullable=True)
+    symbol = db.Column(db.String(50), nullable=False, index=True)
+    timeframe = db.Column(db.String(10), nullable=False)
+    strategy_name = db.Column(db.String(100), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)
+    confidence = db.Column(db.Float, nullable=False)
+    regime = db.Column(db.String(30), nullable=True, index=True)
+    volatility_regime = db.Column(db.String(30), nullable=True, index=True)
+    structural_bias = db.Column(db.String(30), nullable=True)
+    regime_strength = db.Column(db.Float, nullable=True)
+    atr = db.Column(db.Float, nullable=True)
+
+    entry_price = db.Column(db.Float, nullable=True)
+    sl_price = db.Column(db.Float, nullable=True)
+    tp1_price = db.Column(db.Float, nullable=True)
+    tp2_price = db.Column(db.Float, nullable=True)
+    exit_price = db.Column(db.Float, nullable=True)
+    outcome = db.Column(db.String(20), nullable=True)
+    net_r = db.Column(db.Float, nullable=True)
+    pnl = db.Column(db.Float, nullable=True)
+    duration_mins = db.Column(db.Float, nullable=True)
+    offered_tp1_r = db.Column(db.Float, nullable=True)
+    offered_tp2_r = db.Column(db.Float, nullable=True)
+    mfe_r = db.Column(db.Float, nullable=True)
+    mae_r = db.Column(db.Float, nullable=True)
+    details_json = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('evaluation_run_id', 'candidate_number', name='uq_research_candidate_sequence'),
+    )
+
+    def to_dict(self):
+        import json
+        return {
+            'candidate_number': self.candidate_number,
+            'status': self.status,
+            'skip_reason': self.skip_reason,
+            'signal_time': self.signal_time.isoformat() if self.signal_time else None,
+            'entry_time': self.entry_time.isoformat() if self.entry_time else None,
+            'exit_time': self.exit_time.isoformat() if self.exit_time else None,
+            'symbol': self.symbol,
+            'timeframe': self.timeframe,
+            'strategy_name': self.strategy_name,
+            'direction': self.direction,
+            'confidence': self.confidence,
+            'regime': self.regime,
+            'volatility_regime': self.volatility_regime,
+            'structural_bias': self.structural_bias,
+            'regime_strength': self.regime_strength,
+            'atr': self.atr,
+            'entry_price': self.entry_price,
+            'sl_price': self.sl_price,
+            'tp1_price': self.tp1_price,
+            'tp2_price': self.tp2_price,
+            'exit_price': self.exit_price,
+            'outcome': self.outcome,
+            'net_r': self.net_r,
+            'pnl': self.pnl,
+            'duration_mins': self.duration_mins,
+            'offered_tp1_r': self.offered_tp1_r,
+            'offered_tp2_r': self.offered_tp2_r,
+            'mfe_r': self.mfe_r,
+            'mae_r': self.mae_r,
+            'details': json.loads(self.details_json) if self.details_json else None,
+        }
+
+
+class ResearchMetricSlice(db.Model):
+    __tablename__ = 'research_metric_slices'
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    experiment_id = db.Column(db.String(36), db.ForeignKey('research_experiments.id'), nullable=False, index=True)
+    evaluation_run_id = db.Column(db.String(36), db.ForeignKey('research_evaluation_runs.id'), nullable=True, index=True)
+    slice_type = db.Column(db.String(50), nullable=False)
+    slice_key = db.Column(db.String(200), nullable=False)
+    is_primary = db.Column(db.Boolean, nullable=False, default=True)
+    sample_size = db.Column(db.Integer, nullable=False, default=0)
+    independent_block_count = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(30), nullable=False, default='COMPLETE')
+    metrics_json = db.Column(db.Text, nullable=True)
+    uncertainty_json = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('experiment_id', 'evaluation_run_id', 'slice_type', 'slice_key', name='uq_research_metric_slice'),
+    )
+
+    def to_dict(self):
+        import json
+        return {
+            'slice_type': self.slice_type,
+            'slice_key': self.slice_key,
+            'is_primary': self.is_primary,
+            'sample_size': self.sample_size,
+            'independent_block_count': self.independent_block_count,
+            'status': self.status,
+            'metrics': json.loads(self.metrics_json) if self.metrics_json else None,
+            'uncertainty': json.loads(self.uncertainty_json) if self.uncertainty_json else None,
+        }
+
+
+class ResearchTrial(db.Model):
+    __tablename__ = 'research_trials'
+
+    id = db.Column(db.String(36), primary_key=True)
+    experiment_id = db.Column(db.String(36), db.ForeignKey('research_experiments.id'), nullable=False, unique=True, index=True)
+    family_id = db.Column(db.String(120), nullable=False, index=True)
+    variant_id = db.Column(db.String(120), nullable=False)
+    hypothesis = db.Column(db.Text, nullable=False)
+    trial_kind = db.Column(db.String(30), nullable=False, default='CONFIRMATORY')
+    raw_p_value = db.Column(db.Float, nullable=True)
+    adjusted_p_value = db.Column(db.Float, nullable=True)
+    multiple_testing_method = db.Column(db.String(50), nullable=False, default='benjamini-hochberg')
+    family_size = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    def to_dict(self):
+        return {
+            'experiment_id': self.experiment_id,
+            'family_id': self.family_id,
+            'variant_id': self.variant_id,
+            'hypothesis': self.hypothesis,
+            'trial_kind': self.trial_kind,
+            'raw_p_value': self.raw_p_value,
+            'adjusted_p_value': self.adjusted_p_value,
+            'multiple_testing_method': self.multiple_testing_method,
+            'family_size': self.family_size,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

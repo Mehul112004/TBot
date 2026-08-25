@@ -70,6 +70,20 @@ The server emits event names including `session_started`, `session_stopped`, `se
 | `GET` | `/<run_id>` | Retrieve one run and its details |
 | `GET` | `/<run_id>/export` | Export a run in JSON form |
 
+## Walk-forward research — `/api/research`
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/experiments/preview` | Validate a proposed manifest and return data coverage, anchored OOS folds, purge/label horizon, and sealed-holdout boundaries without calculating outcomes |
+| `POST` | `/experiments` | Seal an immutable manifest and create its experiment/trial record; an identical manifest returns the existing experiment |
+| `GET` | `/experiments` | List the 50 most recent research experiments |
+| `POST` | `/experiments/<id>/execute` | Execute or resume missing OOS fold/scenario work and return the complete research detail payload |
+| `POST` | `/experiments/<id>/reveal-holdout` | Deliberately evaluate the final holdout and issue the final research decision; optional JSON field `revealed_by` is persisted for audit |
+| `GET` | `/experiments/<id>` | Retrieve manifest, folds, evaluation runs, metric slices, trial bookkeeping, and decision |
+| `GET` | `/experiments/<id>/export` | Download that canonical research detail payload as JSON |
+
+The current v1 execution endpoint is synchronous. It writes each completed fold/scenario atomically enough for retries to skip completed work, but it is not an asynchronous job/heartbeat API.
+
 ## Price alerts — `/api/alerts`
 
 | Method | Path | Purpose |

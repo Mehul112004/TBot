@@ -12,6 +12,7 @@ from app.blueprints.strategies_bp import strategies_bp
 from app.blueprints.signals_bp import signals_bp
 from app.blueprints.backtest_bp import backtest_bp
 from app.blueprints.alerts_bp import alerts_bp
+from app.blueprints.research_bp import research_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
@@ -34,6 +35,7 @@ def create_app(test_config=None):
     app.register_blueprint(strategies_bp, url_prefix='/api/strategies')
     app.register_blueprint(signals_bp, url_prefix='/api/signals')
     app.register_blueprint(backtest_bp, url_prefix='/api/backtest')
+    app.register_blueprint(research_bp, url_prefix='/api/research')
     app.register_blueprint(alerts_bp, url_prefix='/api/alerts')
 
     print(f"App started at ===> {datetime.now()}", flush=True)

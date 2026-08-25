@@ -41,7 +41,7 @@ Binance REST ──────►│ Candle persistence │◄──── Bina
                          React dashboard         Telegram chat
 ```
 
-`backend/app/__init__.py` is the composition root. Outside test mode it initialises the database schema, synchronises the strategy registry, registers seven API blueprints, and starts the scanner-adjacent background services.
+`backend/app/__init__.py` is the composition root. Outside test mode it initialises the database schema, synchronises the strategy registry, registers eight API blueprints, and starts the scanner-adjacent background services.
 
 ## Live signal lifecycle
 
@@ -94,7 +94,7 @@ The prompt context builder includes the candidate metadata/risk, price action, t
 | Candles, S/R zones, strategy preferences | PostgreSQL | Yes |
 | Session records | PostgreSQL | Yes as records; streams are not re-created automatically |
 | Active `AnalysisSession` objects and WebSocket streams | `LiveScanner` memory | No |
-| Watching/confirmed/rejected signals, LLM logs, price alerts, backtest runs/trades | PostgreSQL | Yes |
+| Watching/confirmed/rejected signals, LLM logs, price alerts, backtest runs/trades, sealed research experiments/folds/outcomes | PostgreSQL | Yes |
 | Indicator cache, SSE client queues, LLM/Telegram work queues | Process memory | No |
 | Outcome and price-alert tracker indexes | Rebuilt from stored active records at startup | Yes, after cache rebuild |
 
@@ -104,10 +104,10 @@ This distinction matters when operating the service: stopping or restarting the 
 
 The backend exposes:
 
-- REST under `/api/data`, `/api/indicators`, `/api/sr-zones`, `/api/strategies`, `/api/signals`, `/api/backtest`, and `/api/alerts`.
+- REST under `/api/data`, `/api/indicators`, `/api/sr-zones`, `/api/strategies`, `/api/signals`, `/api/backtest`, `/api/research`, and `/api/alerts`.
 - Server-Sent Events from `GET /api/signals/stream`.
 
-The React app uses `frontend/src/lib/api.ts` as its REST boundary and `frontend/src/hooks/useSSE.ts` for the live feed connection. Its primary routes are data import, signal feed, charts, server-side backtests, local JSON backtest comparison, LLM logs, and price alerts. The exact REST/SSE contract is maintained in [API reference](logic/api_endpoints.md).
+The React app uses `frontend/src/api/client.ts` as its REST boundary and `frontend/src/hooks/useSSE.ts` for the live feed connection. Its primary routes are data import, signal feed, charts, server-side backtests, walk-forward validation, local JSON backtest comparison, LLM logs, and price alerts. The exact REST/SSE contract is maintained in [API reference](logic/api_endpoints.md).
 
 ## Source map for changes
 
@@ -121,6 +121,7 @@ The React app uses `frontend/src/lib/api.ts` as its REST boundary and `frontend/
 | LLM context/provider/queue | `backend/app/core/llm_context_builder.py`, `llm_client.py`, `llm_providers.py`, `llm_queue.py` |
 | Telegram/price-outcome delivery | `telegram.py`, `telegram_delivery.py`, `outcome_tracker.py`, `price_alert_tracker.py` |
 | Schema or persisted result shape | `backend/app/models/db.py` and corresponding blueprint/core manager |
+| Walk-forward folds, candidate outcomes, and research gates | `backend/app/research/`, `backend/app/blueprints/research_bp.py`, `backend/scripts/run_walk_forward.py` |
 | Dashboard/API consumption | `frontend/src/lib/api.ts`, page/component/hook that owns the surface |
 
 ## Test and artifact map

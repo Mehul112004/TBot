@@ -118,6 +118,10 @@ class SetupSignal:
     gates_failed: List[str] = field(default_factory=list)
     htf_context: Optional[dict] = None
     regime: str = "UNKNOWN"
+    volatility_regime: str = "UNKNOWN"
+    structural_bias: str = "UNKNOWN"
+    regime_strength: Optional[float] = None
+    atr: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -135,6 +139,10 @@ class SetupSignal:
             'gates_passed': self.gates_passed,
             'gates_failed': self.gates_failed,
             'regime': self.regime,
+            'volatility_regime': self.volatility_regime,
+            'structural_bias': self.structural_bias,
+            'regime_strength': self.regime_strength,
+            'atr': self.atr,
         }
 
 

@@ -11,6 +11,7 @@
 | [Strategy catalog](strategy-catalog.md) | The live strategy set, strategy contract, LLM/direct-alert distinction, archive status |
 | [Backtesting model](backtesting.md) | Simulation semantics, artifacts, scripts, and research workflow |
 | [Signal quality roadmap](signal-quality-roadmap.md) | Proposed implementation plan for research validation, evidence snapshots, calibration, LLM guardrails, and manual-review feedback |
+| [Walk-forward signal validation plan](walk-forward-signal-validation-plan.md) | Implemented v1 contract and deferred roadmap for OOS folds, candidate outcomes, uncertainty, promotion gates, holdout control, persistence, API/UI, and rollout |
 | [API reference](logic/api_endpoints.md) | Current Flask REST and SSE surface |
 | [Data ingestion](logic/data_ingestion.md) | Binance/CSV data path and candle-finalization rules |
 | [Indicators and regime](logic/indicators.md) | Current indicator and market-regime calculation surface |

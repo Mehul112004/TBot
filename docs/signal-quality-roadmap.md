@@ -264,7 +264,9 @@ Work in this order. Each phase is independently useful and must preserve the exi
 
 **Goal:** make existing backtests comparable and auditable.
 
-**Implementation status (engine 4.0.0):** causal execution/data preflight, warm-up isolation, fail-closed strategy execution, engine/strategy/policy metadata, and a candle-value fingerprint are implemented. Walk-forward/OOS schemas, per-regime breakdowns, uncertainty intervals, and explicit cost components remain to be built before Phase A is complete.
+**Detailed implementation plan:** [Walk-forward signal validation](walk-forward-signal-validation-plan.md).
+
+**Implementation status (walk-forward v1):** causal execution/data preflight, warm-up isolation, fail-closed strategy execution, engine/strategy/policy metadata, candle-value fingerprints, sealed anchored OOS/holdout experiments, candidate/policy tracks, detection-time regime slices, uncertainty intervals, cost stress, trial-family bookkeeping, API/CLI, and dashboard review are implemented. Async jobs, rolling/multi-asset execution, detailed fee/spread/funding/impact costs, parameter sensitivity, concentration diagnostics, and live-score calibration remain deferred.
 
 - Add run/strategy/parameter/data/cost-model version metadata.
 - Add data-quality preflight output and experiment-manifest persistence.

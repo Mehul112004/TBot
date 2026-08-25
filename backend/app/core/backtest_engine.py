@@ -390,6 +390,185 @@ class BacktestEngine:
 
         return trades
 
+    @staticmethod
+    def simulate_candidate_outcomes(
+        signals: list[SetupSignal],
+        candle_df: pd.DataFrame,
+        initial_capital: float,
+        risk_pct: float,
+        slippage_bps: float = 10.0,
+        unfavorable_expiry_bars: int = 8,
+        favorable_expiry_bars: int = 24,
+    ) -> list[dict]:
+        """Evaluate every eligible signal independently.
+
+        This is deliberately different from :meth:`simulate_trades`. The
+        single-position simulator answers how the current alert policy behaves;
+        this method answers whether each candidate itself was a good opportunity.
+        Every signal gets a record, including a transparent skip reason. Each
+        accepted candidate delegates its execution to ``simulate_trades`` on a
+        bounded signal-to-label window, guaranteeing identical next-open, gap,
+        stop-first, target, expiry, and after-cost semantics without allowing
+        overlapping candidates to affect one another's sizing or eligibility.
+        """
+        if initial_capital <= 0:
+            raise ValueError("initial_capital must be positive")
+        if not 0 < risk_pct <= 1:
+            raise ValueError("risk_pct must be greater than 0 and at most 1")
+        if slippage_bps < 0:
+            raise ValueError("slippage_bps cannot be negative")
+
+        candle_df = BacktestEngine.validate_candle_data(
+            candle_df,
+            require_volume=False,
+            check_gaps=False,
+        )
+        time_index = {
+            pd.Timestamp(timestamp).value: idx
+            for idx, timestamp in enumerate(candle_df['open_time'].tolist())
+        }
+        max_expiry = max(unfavorable_expiry_bars, favorable_expiry_bars)
+        timeframe_delta = pd.Timedelta(milliseconds=TIMEFRAME_MS.get(
+            signals[0].timeframe, 0,
+        )) if signals else pd.Timedelta(0)
+        outcomes = []
+
+        def safe_signal_time(signal: SetupSignal):
+            if signal.timestamp is None:
+                return None
+            return BacktestEngine._utc_naive_timestamp(signal.timestamp).to_pydatetime()
+
+        for candidate_number, signal in enumerate(signals, start=1):
+            signal_time = safe_signal_time(signal)
+            base = {
+                'candidate_number': candidate_number,
+                'signal_time': signal_time,
+                'symbol': signal.symbol,
+                'timeframe': signal.timeframe,
+                'strategy_name': signal.strategy_name,
+                'direction': signal.direction,
+                'confidence': float(signal.confidence or 0.0),
+                'regime': getattr(signal, 'regime', 'UNKNOWN'),
+                'volatility_regime': getattr(signal, 'volatility_regime', 'UNKNOWN'),
+                'structural_bias': getattr(signal, 'structural_bias', 'UNKNOWN'),
+                'regime_strength': getattr(signal, 'regime_strength', None),
+                'atr': getattr(signal, 'atr', None),
+            }
+
+            if signal_time is None:
+                outcomes.append({
+                    **base,
+                    'status': 'SKIPPED',
+                    'skip_reason': 'missing_signal_timestamp',
+                    'details': {},
+                })
+                continue
+
+            signal_idx = time_index.get(pd.Timestamp(signal_time).value)
+            if signal_idx is None:
+                raise ValueError(
+                    f"Signal timestamp {signal_time.isoformat()} from "
+                    f"{signal.strategy_name} does not match a candle exactly"
+                )
+
+            # One signal candle plus every bar that can determine the current
+            # hybrid expiry outcome. The slice prevents a candidate evaluator
+            # from needlessly receiving future candles beyond its label horizon.
+            candidate_window = candle_df.iloc[
+                signal_idx:min(len(candle_df), signal_idx + 1 + max_expiry)
+            ].copy()
+            audit = {}
+            try:
+                trades = BacktestEngine.simulate_trades(
+                    signals=[signal],
+                    candle_df=candidate_window,
+                    initial_capital=initial_capital,
+                    risk_pct=risk_pct,
+                    slippage_bps=slippage_bps,
+                    unfavorable_expiry_bars=unfavorable_expiry_bars,
+                    favorable_expiry_bars=favorable_expiry_bars,
+                    audit=audit,
+                )
+            except ValueError as exc:
+                outcomes.append({
+                    **base,
+                    'status': 'SKIPPED',
+                    'skip_reason': 'invalid_signal',
+                    'details': {'error': str(exc)},
+                })
+                continue
+
+            if not trades:
+                rejections = audit.get('rejections', {})
+                skip_reason = next(iter(rejections), 'not_evaluated')
+                outcomes.append({
+                    **base,
+                    'status': 'SKIPPED',
+                    'skip_reason': skip_reason,
+                    'details': {'simulation_audit': audit},
+                })
+                continue
+
+            trade = trades[0]
+            risk_distance = abs(trade['entry_price'] - trade['sl_price'])
+            offered_tp1_r = (
+                abs(trade['tp1_price'] - trade['entry_price']) / risk_distance
+                if risk_distance > 0 else None
+            )
+            offered_tp2_r = (
+                abs(trade['tp2_price'] - trade['entry_price']) / risk_distance
+                if risk_distance > 0 else None
+            )
+
+            # MFE/MAE are conservative OHLC descriptors. Bars before exit use
+            # their visible extremes; the exit bar itself is clipped to the
+            # executable terminal price so an unknowable post-stop/target move
+            # cannot improve a candidate retrospectively.
+            exit_timestamp = BacktestEngine._utc_naive_timestamp(trade['exit_time'])
+            if trade['outcome'] == 'EXPIRED':
+                exit_timestamp -= timeframe_delta
+            exit_idx = time_index.get(exit_timestamp.value)
+            if exit_idx is None:
+                # The terminal bar exists in the bounded candidate window. This
+                # branch is defensive so a corrupted timestamp cannot fabricate
+                # excursion statistics.
+                mfe_r = None
+                mae_r = None
+            else:
+                pre_exit = candle_df.iloc[signal_idx + 1:exit_idx]
+                highs = pre_exit['high'].tolist() + [trade['exit_price']]
+                lows = pre_exit['low'].tolist() + [trade['exit_price']]
+                if signal.direction == 'LONG':
+                    mfe_r = (max(highs) - trade['entry_price']) / risk_distance
+                    mae_r = (min(lows) - trade['entry_price']) / risk_distance
+                else:
+                    mfe_r = (trade['entry_price'] - min(lows)) / risk_distance
+                    mae_r = (trade['entry_price'] - max(highs)) / risk_distance
+
+            outcomes.append({
+                **base,
+                'status': 'EVALUATED',
+                'skip_reason': None,
+                'entry_time': trade['entry_time'],
+                'exit_time': trade['exit_time'],
+                'entry_price': trade['entry_price'],
+                'sl_price': trade['sl_price'],
+                'tp1_price': trade['tp1_price'],
+                'tp2_price': trade['tp2_price'],
+                'exit_price': trade['exit_price'],
+                'outcome': trade['outcome'],
+                'net_r': trade['rr_ratio'],
+                'pnl': trade['pnl'],
+                'duration_mins': trade['duration_mins'],
+                'offered_tp1_r': round(float(offered_tp1_r), 6) if offered_tp1_r is not None else None,
+                'offered_tp2_r': round(float(offered_tp2_r), 6) if offered_tp2_r is not None else None,
+                'mfe_r': round(float(mfe_r), 6) if mfe_r is not None else None,
+                'mae_r': round(float(mae_r), 6) if mae_r is not None else None,
+                'details': {'simulation_audit': audit},
+            })
+
+        return outcomes
+
     # ---------- Equity Curve ----------
 
     @staticmethod

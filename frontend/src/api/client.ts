@@ -304,6 +304,7 @@ export const fetchWatchingSetup = async (setupId: string): Promise<WatchingSetup
 // ---------- Phase 7: Backtesting ----------
 
 import type { BacktestConfig, BacktestResult, BacktestRunSummary } from '../types/backtest';
+import type { ResearchDetail, ResearchExperiment, ResearchManifestInput, ResearchPreview } from '../types/research';
 
 export const runBacktest = async (config: BacktestConfig): Promise<BacktestResult> => {
   const { data } = await apiClient.post('/backtest/run', config);
@@ -322,6 +323,28 @@ export const fetchBacktestRun = async (runId: string): Promise<{ run: BacktestRu
 
 export const getBacktestExportUrl = (runId: string): string => {
   return `${API_BASE}/backtest/${runId}/export`;
+};
+
+// ---------- Walk-forward research validation ----------
+
+export const previewResearchExperiment = async (manifest: ResearchManifestInput): Promise<ResearchPreview> => {
+  const { data } = await apiClient.post('/research/experiments/preview', manifest);
+  return data;
+};
+
+export const createResearchExperiment = async (manifest: ResearchManifestInput): Promise<{ created: boolean; experiment: ResearchExperiment }> => {
+  const { data } = await apiClient.post('/research/experiments', manifest);
+  return data;
+};
+
+export const executeResearchExperiment = async (experimentId: string): Promise<ResearchDetail> => {
+  const { data } = await apiClient.post(`/research/experiments/${experimentId}/execute`);
+  return data;
+};
+
+export const revealResearchHoldout = async (experimentId: string): Promise<ResearchDetail> => {
+  const { data } = await apiClient.post(`/research/experiments/${experimentId}/reveal-holdout`, { revealed_by: 'dashboard' });
+  return data;
 };
 
 // ---------- Phase 8: LLM Logs ----------
